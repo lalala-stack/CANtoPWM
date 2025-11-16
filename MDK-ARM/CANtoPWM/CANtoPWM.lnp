@@ -11,6 +11,8 @@
 "cantopwm\usart.o"
 "cantopwm\stm32f1xx_it.o"
 "cantopwm\stm32f1xx_hal_msp.o"
+"cantopwm\canard_dynamic_node_id_client.o"
+"cantopwm\dynamic_node_id_allocation.o"
 "cantopwm\stm32f1xx_hal_gpio_ex.o"
 "cantopwm\stm32f1xx_hal_can.o"
 "cantopwm\stm32f1xx_hal.o"

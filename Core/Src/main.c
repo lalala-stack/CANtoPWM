@@ -30,7 +30,7 @@
 #include "canard_internals.h"
 #include "uavcan/equipment/actuator/ArrayCommand.h"
 #include <stdio.h>
-//#include "uavcan.equipment.actuator.ArrayCommand.h"
+#include "canard_dynamic_node_id_client.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -70,6 +70,10 @@ int16_t sendNodeStatusRequest(CanardInstance* ins, uint8_t target_node_id);
 CanardInstance canard_ins;
 uint8_t canard_memory_pool[4096]; //内存池
 
+// Dynamic Node ID client
+CanardDynIDClient dynid_client;
+uint8_t node_unique_id[16];
+
 //传输ID计数器
 static uint8_t actuator_cmd_transfer_id = 0;
 
@@ -80,7 +84,7 @@ static uavcan_equipment_actuator_ArrayCommand rx_actuator_cmd;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-
+void read_unique_id(uint8_t* out_uid);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -105,6 +109,24 @@ PUTCHAR_PROTOTYPE
   HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 0xFFFF);
 
   return ch;
+}
+
+void read_unique_id(uint8_t* out_uid)
+{
+    // STM32F1xx series has a 96-bit unique ID starting at this address
+    const uint32_t* uid_reg = (const uint32_t*)0x1FFFF7E8;
+    uint8_t uid_buf[12];
+    for (uint8_t i = 0; i < 3; i++)
+    {
+        uint32_t word = uid_reg[i];
+        uid_buf[i*4 + 0] = (word >> 0) & 0xFF;
+        uid_buf[i*4 + 1] = (word >> 8) & 0xFF;
+        uid_buf[i*4 + 2] = (word >> 16) & 0xFF;
+        uid_buf[i*4 + 3] = (word >> 24) & 0xFF;
+    }
+    // The unique ID for allocation is 16 bytes, we pad the 12-byte MCU ID with zeros
+    memset(out_uid, 0, 16);
+    memcpy(out_uid, uid_buf, 12);
 }
 /* USER CODE END 0 */
 
@@ -142,6 +164,9 @@ int main(void)
   MX_TIM2_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
+	// 读取MCU唯一ID
+	read_unique_id(node_unique_id);
+
   // 启动TIM2的4个PWM通道
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
@@ -156,8 +181,10 @@ int main(void)
 						shouldAcceptTransfer,
 						NULL);
 
-	// 设置本地节点ID
-	canardSetLocalNodeID(&canard_ins, 10); // 设置节点ID为10
+	// 初始化动态ID客户端
+	canardDynIDClientInit(&dynid_client, node_unique_id);
+	// 设置本地节点ID为匿名
+	canardSetLocalNodeID(&canard_ins, CANARD_BROADCAST_NODE_ID);
 
 	// 初始化CAN过滤器
 	CAN_FilterTypeDef filter;
@@ -180,8 +207,38 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+	// 启动动态ID分配过程
+	if (canardDynIDClientStart(&dynid_client, &canard_ins, 0) < 0)
+	{
+			// 错误处理
+			printf("Failed to start dynamic ID allocation\r\n");
+			Error_Handler();
+	}
+
   while (1)
   {
+		// 等待动态ID分配完成
+		while(canardDynIDClientGetNodeID(&dynid_client) == CANARD_BROADCAST_NODE_ID)
+		{
+				processCanTxQueue(); // 持续处理发送队列
+
+				// 检查是否有挂起的消息
+				if (HAL_CAN_GetRxFifoFillLevel(&hcan, CAN_RX_FIFO0) > 0)
+				{
+						HAL_CAN_RxFifo0MsgPendingCallback(&hcan);
+				}
+
+				HAL_Delay(10); // 短暂延迟
+		}
+
+		// ID分配成功，设置节点ID
+		if (canardGetLocalNodeID(&canard_ins) == CANARD_BROADCAST_NODE_ID)
+		{
+				uint8_t allocated_id = canardDynIDClientGetNodeID(&dynid_client);
+				canardSetLocalNodeID(&canard_ins, allocated_id);
+				printf("Node ID allocated: %d\r\n", allocated_id);
+		}
+
     // 处理发送队列
     processCanTxQueue();
     
@@ -251,7 +308,20 @@ bool shouldAcceptTransfer(const CanardInstance* ins,
                          CanardTransferType transfer_type,
                          uint8_t source_node_id) {
     (void)ins;
-    
+		(void)source_node_id;
+
+		// 在获得节点ID之前，只接受动态节点ID分配消息
+    if (canardGetLocalNodeID(&canard_ins) == CANARD_BROADCAST_NODE_ID)
+    {
+        if (data_type_id == UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID &&
+            transfer_type == CanardTransferTypeBroadcast)
+        {
+            *out_data_type_signature = UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_SIGNATURE;
+            return true;
+        }
+        return false;
+    }
+
     // 根据数据类型ID决定是否接受
     if (data_type_id == UAVCAN_EQUIPMENT_ACTUATOR_ARRAYCOMMAND_ID) {
         *out_data_type_signature = UAVCAN_EQUIPMENT_ACTUATOR_ARRAYCOMMAND_SIGNATURE;
@@ -269,8 +339,13 @@ bool shouldAcceptTransfer(const CanardInstance* ins,
 
 // 接收到完整传输后的回调函数
 void onTransferReception(CanardInstance* ins, CanardRxTransfer* transfer) {
+    // 如果是动态ID分配的响应
+    if (transfer->data_type_id == UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID)
+    {
+        canardDynIDClientHandleAllocationResponse(&dynid_client, transfer);
+    }
     // 检查数据类型
-    if (transfer->data_type_id == UAVCAN_EQUIPMENT_ACTUATOR_ARRAYCOMMAND_ID) {
+    else if (transfer->data_type_id == UAVCAN_EQUIPMENT_ACTUATOR_ARRAYCOMMAND_ID) {
         // 解码接收到的数据
         int32_t result = uavcan_equipment_actuator_ArrayCommand_decode(transfer, transfer->payload_len, &rx_actuator_cmd, NULL);
         if (result >= 0) {

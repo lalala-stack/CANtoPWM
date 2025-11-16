@@ -314,7 +314,7 @@
           </ArmAdsMisc>
           <Cads>
             <interw>1</interw>
-            <Optim>4</Optim>
+            <Optim>2</Optim>
             <oTime>0</oTime>
             <SplitLS>0</SplitLS>
             <OneElfS>1</OneElfS>
@@ -499,6 +499,16 @@
               <FileName>stm32f1xx_hal_msp.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/stm32f1xx_hal_msp.c</FilePath>
+            </File>
+            <File>
+              <FileName>canard_dynamic_node_id_client.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\canard_dynamic_node_id_client.c</FilePath>
+            </File>
+            <File>
+              <FileName>dynamic_node_id_Allocation.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\include\uavcan\protocol\dynamic_node_id\dynamic_node_id_Allocation.c</FilePath>
             </File>
           </Files>
         </Group>
