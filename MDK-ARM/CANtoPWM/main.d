@@ -40,6 +40,7 @@ cantopwm\main.o: E:\MyApp\Keil\Program\ARM\ArmCompiler506\Bin\..\include\assert.
 cantopwm\main.o: ../Core/Inc/canard_internals.h
 cantopwm\main.o: ../Core/include/uavcan/equipment/actuator/ArrayCommand.h
 cantopwm\main.o: ../Core/include/uavcan\equipment\actuator\Command.h
+cantopwm\main.o: ../Core/include/uavcan/protocol/NodeStatus.h
 cantopwm\main.o: E:\MyApp\Keil\Program\ARM\ArmCompiler506\Bin\..\include\stdio.h
 cantopwm\main.o: ../Core/Inc/canard_dynamic_node_id_client.h
 cantopwm\main.o: ../Core/include/uavcan/protocol/dynamic_node_id/Allocation.h

@@ -510,6 +510,11 @@
               <FileType>1</FileType>
               <FilePath>..\Core\include\uavcan\protocol\dynamic_node_id\dynamic_node_id_Allocation.c</FilePath>
             </File>
+            <File>
+              <FileName>protocol_NodeStatus.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\include\uavcan\protocol\protocol_NodeStatus.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

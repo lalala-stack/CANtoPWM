@@ -29,6 +29,7 @@
 #include "canard.h"
 #include "canard_internals.h"
 #include "uavcan/equipment/actuator/ArrayCommand.h"
+#include "uavcan/protocol/NodeStatus.h"
 #include <stdio.h>
 #include "canard_dynamic_node_id_client.h"
 /* USER CODE END Includes */
@@ -47,6 +48,7 @@ void processCanRxFrames(void);
 void processCanTxQueue(void);
 int16_t sendActuatorCommand(CanardInstance* ins, uint8_t actuator_id, float value);
 int16_t sendNodeStatusRequest(CanardInstance* ins, uint8_t target_node_id);
+void publishNodeStatus(void);
 
 // UAVCAN协议相关定义
 #define UAVCAN_PROTOCOL_GETNODEINFO_SIGNATURE 0x07f0a7b40a594a47
@@ -128,6 +130,52 @@ void read_unique_id(uint8_t* out_uid)
     memset(out_uid, 0, 16);
     memcpy(out_uid, uid_buf, 12);
 }
+
+// --- 自检测试函数 ---
+void run_parsing_test(void) {
+    printf("\r\n=== Running Software Parsing Test ===\r\n");
+
+    // 1. 临时设置一个本地节点ID，否则 shouldAcceptTransfer 会拒绝接收控制命令
+    uint8_t original_node_id = canardGetLocalNodeID(&canard_ins);
+    canardSetLocalNodeID(&canard_ins, 100); 
+
+    // 2. 构造一个 ActuatorCommand 消息 (模拟上位机发送)
+    uavcan_equipment_actuator_ArrayCommand cmd;
+    uavcan_equipment_actuator_Command cmd_data[1]; // 创建一个静态数组来存储命令数据
+    cmd.commands.len = 1;
+    cmd.commands.data = cmd_data; // 将指针指向静态数组
+    cmd.commands.data[0].actuator_id = 0;       // 控制第1个电机
+    cmd.commands.data[0].command_type = 0;   // UNITLESS
+    cmd.commands.data[0].command_value = 0.5f;  // 50% 油门 (预期脉宽 1750us)
+
+    uint8_t buffer[UAVCAN_EQUIPMENT_ACTUATOR_ARRAYCOMMAND_MAX_SIZE];
+    uint32_t len = uavcan_equipment_actuator_ArrayCommand_encode(&cmd, buffer);
+
+    // 3. 添加 UAVCAN 传输层尾字节 (Tail Byte)
+    // 单帧传输: Start=1, End=1, Toggle=0, TID=0 => 0xC0
+    buffer[len] = 0xC0; 
+    len++;
+
+    // 4. 构造 CAN 帧
+    CanardCANFrame frame;
+    // ID结构: Priority(5) | MsgID(16) | SourceID(7)
+    // Priority=Medium(16), MsgID=1010 (ArrayCommand), SourceID=42 (模拟发送者)
+    frame.id = (CANARD_TRANSFER_PRIORITY_MEDIUM << 24) | 
+               (UAVCAN_EQUIPMENT_ACTUATOR_ARRAYCOMMAND_ID << 8) | 
+               42;
+    frame.id |= CANARD_CAN_FRAME_EFF; // 扩展帧标志
+    frame.data_len = len;
+    memcpy(frame.data, buffer, len);
+
+    // 5. 注入到协议栈
+    printf("Injecting fake CAN frame (ID: 0x%X, Len: %d)...\r\n", frame.id, frame.data_len);
+    canardHandleRxFrame(&canard_ins, &frame, HAL_GetTick() * 1000);
+
+    // 6. 恢复原来的节点ID状态
+    canardSetLocalNodeID(&canard_ins, original_node_id);
+    
+    printf("=== Test Finished ===\r\n\r\n");
+}
 /* USER CODE END 0 */
 
 /**
@@ -166,6 +214,9 @@ int main(void)
   /* USER CODE BEGIN 2 */
 	// 读取MCU唯一ID
 	read_unique_id(node_unique_id);
+    printf("UID: ");
+    for(int i=0; i<16; i++) printf("%02X ", node_unique_id[i]);
+    printf("\r\n");
 
   // 启动TIM2的4个PWM通道
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
@@ -203,6 +254,7 @@ int main(void)
 	// 启动CAN
 	HAL_CAN_Start(&hcan);
 	HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO0_MSG_PENDING);
+	
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -215,18 +267,24 @@ int main(void)
 			Error_Handler();
 	}
 
+    // 运行自检测试
+    //run_parsing_test();
+
+    static uint32_t last_allocation_request_time = 0;
   while (1)
   {
 		// 等待动态ID分配完成
 		while(canardDynIDClientGetNodeID(&dynid_client) == CANARD_BROADCAST_NODE_ID)
 		{
-				processCanTxQueue(); // 持续处理发送队列
+                // 每隔1秒重发一次分配请求
+                if (HAL_GetTick() - last_allocation_request_time > 1000)
+                {
+                    int16_t res = canardDynIDClientStart(&dynid_client, &canard_ins, 0);
+                    last_allocation_request_time = HAL_GetTick();
+                    printf("Requesting ID... Res: %d\r\n", res);
+                }
 
-				// 检查是否有挂起的消息
-				if (HAL_CAN_GetRxFifoFillLevel(&hcan, CAN_RX_FIFO0) > 0)
-				{
-						HAL_CAN_RxFifo0MsgPendingCallback(&hcan);
-				}
+				processCanTxQueue(); // 持续处理发送队列
 
 				HAL_Delay(10); // 短暂延迟
 		}
@@ -242,6 +300,14 @@ int main(void)
     // 处理发送队列
     processCanTxQueue();
     
+    // 发送心跳包 (1Hz)
+    static uint32_t last_node_status_time = 0;
+    if (HAL_GetTick() - last_node_status_time >= 1000)
+    {
+        publishNodeStatus();
+        last_node_status_time = HAL_GetTick();
+    }
+
     // 清理过期的传输
     uint64_t timestamp = HAL_GetTick() * 1000; // 转换为微秒
     canardCleanupStaleTransfers(&canard_ins, timestamp);
@@ -347,10 +413,19 @@ void onTransferReception(CanardInstance* ins, CanardRxTransfer* transfer) {
     // 检查数据类型
     else if (transfer->data_type_id == UAVCAN_EQUIPMENT_ACTUATOR_ARRAYCOMMAND_ID) {
         // 解码接收到的数据
-        int32_t result = uavcan_equipment_actuator_ArrayCommand_decode(transfer, transfer->payload_len, &rx_actuator_cmd, NULL);
+        // 注意：这里需要提供一个缓冲区给动态数组使用
+        // libcanard 要求通过 dyn_arr_buf 参数传递缓冲区指针的地址
+        static uavcan_equipment_actuator_Command cmd_buffer[15];
+        uint8_t* p_dynamic_array_buffer = (uint8_t*)cmd_buffer;
+        
+        // 传入 &p_dynamic_array_buffer，这样解码函数内部会将 dest->commands.data 指向 cmd_buffer
+        int32_t result = uavcan_equipment_actuator_ArrayCommand_decode(transfer, transfer->payload_len, &rx_actuator_cmd, &p_dynamic_array_buffer);
+        
         if (result >= 0) {
             // 解码成功，处理命令
             processActuatorCommands(&rx_actuator_cmd);
+        } else {
+            printf("Decode fail: %d\r\n", result);
         }
     }
     
@@ -418,7 +493,12 @@ void processCanTxQueue(void) {
             // 成功发送，从队列移除
             canardPopTxQueue(&canard_ins);
         } else {
-            // 发送失败，退出循环
+            // 发送失败，打印错误原因
+            uint32_t err = HAL_CAN_GetError(&hcan);
+            uint32_t free_level = HAL_CAN_GetTxMailboxesFreeLevel(&hcan);
+            printf("CAN Tx Fail. Err: 0x%X, FreeMB: %d, ESR: 0x%X\r\n", err, free_level, hcan.Instance->ESR);
+            
+            // 如果是邮箱满，就不需要一直打印了，直接退出等待下一次
             break;
         }
         
@@ -467,6 +547,28 @@ int16_t sendNodeStatusRequest(CanardInstance* ins, uint8_t target_node_id) {
     
     // 发送请求
     return canardRequestOrRespondObj(ins, target_node_id, &transfer);
+}
+
+void publishNodeStatus(void)
+{
+    uavcan_protocol_NodeStatus msg;
+    msg.uptime_sec = HAL_GetTick() / 1000;
+    msg.health = UAVCAN_PROTOCOL_NODESTATUS_HEALTH_OK;
+    msg.mode = UAVCAN_PROTOCOL_NODESTATUS_MODE_OPERATIONAL;
+    msg.sub_mode = 0;
+    msg.vendor_specific_status_code = 0;
+
+    uint8_t buffer[UAVCAN_PROTOCOL_NODESTATUS_MAX_SIZE];
+    uint32_t len = uavcan_protocol_NodeStatus_encode(&msg, buffer);
+
+    static uint8_t transfer_id = 0;
+    canardBroadcast(&canard_ins, 
+                    UAVCAN_PROTOCOL_NODESTATUS_SIGNATURE,
+                    UAVCAN_PROTOCOL_NODESTATUS_ID,
+                    &transfer_id,
+                    CANARD_TRANSFER_PRIORITY_LOW,
+                    buffer,
+                    len);
 }
 
 // CAN接收中断回调函数

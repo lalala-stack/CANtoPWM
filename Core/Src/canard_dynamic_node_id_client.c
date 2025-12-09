@@ -25,9 +25,9 @@ int canardDynIDClientStart(CanardDynIDClient* self,
     msg.node_id = preferred_node_id;
     msg.first_part_of_unique_id = true;
     
-    // The unique ID is sent in parts, first part is 7 bytes
-    msg.unique_id.len = 7;
-    memcpy(msg.unique_id.data, self->unique_id, msg.unique_id.len);
+    // The unique ID is sent in parts, first part is 6 bytes
+    msg.unique_id.len = 6;
+    msg.unique_id.data = self->unique_id;
 
     uint8_t buffer[UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_MAX_SIZE];
     uint32_t len = uavcan_protocol_dynamic_node_id_Allocation_encode(&msg, buffer);
