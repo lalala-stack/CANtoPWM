@@ -59,7 +59,14 @@ void canardDynIDClientHandleAllocationResponse(CanardDynIDClient* self, CanardRx
     }
 
     uavcan_protocol_dynamic_node_id_Allocation msg;
-    if (uavcan_protocol_dynamic_node_id_Allocation_decode(transfer, transfer->payload_len, &msg, NULL) >= 0)
+    
+    // --- FIX BEGIN: 提供缓冲区给动态数组 ---
+    uint8_t unique_id_buffer[16]; 
+    uint8_t* dyn_arr_buf = unique_id_buffer;
+
+    // 传入 &dyn_arr_buf
+    if (uavcan_protocol_dynamic_node_id_Allocation_decode(transfer, transfer->payload_len, &msg, &dyn_arr_buf) >= 0)
+    // --- FIX END ---
     {
         // Check if the response is for us
         if (memcmp(msg.unique_id.data, self->unique_id, msg.unique_id.len) == 0)

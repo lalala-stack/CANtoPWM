@@ -131,50 +131,117 @@ void read_unique_id(uint8_t* out_uid)
     memcpy(out_uid, uid_buf, 12);
 }
 
-// --- 自检测试函数 ---
-void run_parsing_test(void) {
-    printf("\r\n=== Running Software Parsing Test ===\r\n");
+// --- 辅助工具：虚拟服务器实例 ---
+// 用于生成正确的 CAN 帧（自动处理多帧、CRC、尾字节）
+void inject_rx_frame_from_server(CanardInstance* server_ins, uint64_t timestamp_usec) {
+    for (const CanardCANFrame* tx_frame = canardPeekTxQueue(server_ins); 
+         tx_frame != NULL; 
+         tx_frame = canardPeekTxQueue(server_ins)) 
+    {
+        // 将服务器发出的帧，注入到主实例的接收端
+        canardHandleRxFrame(&canard_ins, tx_frame, timestamp_usec);
+        // 从服务器队列移除
+        canardPopTxQueue(server_ins);
+    }
+}
 
-    // 1. 临时设置一个本地节点ID，否则 shouldAcceptTransfer 会拒绝接收控制命令
-    uint8_t original_node_id = canardGetLocalNodeID(&canard_ins);
-    canardSetLocalNodeID(&canard_ins, 100); 
+// --- 动态ID分配测试函数 (修复版) ---
+void run_dynamic_id_test(void) {
+    printf("\r\n=== Running Dynamic ID Allocation Test ===\r\n");
 
-    // 2. 构造一个 ActuatorCommand 消息 (模拟上位机发送)
+    // 1. 创建一个临时的服务器实例
+    CanardInstance server_ins;
+    uint8_t server_mem[1024];
+    canardInit(&server_ins, server_mem, sizeof(server_mem), NULL, NULL, NULL);
+    canardSetLocalNodeID(&server_ins, 127); // 假设服务器 ID 为 127
+
+    // 2. 构造 Allocation 消息 (模拟服务器给我们的响应)
+    uavcan_protocol_dynamic_node_id_Allocation msg;
+    msg.node_id = 42; // 服务器决定分配给我们的 ID
+    msg.first_part_of_unique_id = 1; // 这是第一阶段（包含完整UID）
+    msg.unique_id.len = 16;
+    msg.unique_id.data = node_unique_id; // 必须匹配我们自己的 UID
+
+    uint8_t buffer[UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_MAX_SIZE];
+    uint32_t len = uavcan_protocol_dynamic_node_id_Allocation_encode(&msg, buffer);
+
+    // 3. 让服务器广播这个消息
+    static uint8_t transfer_id = 0;
+    canardBroadcast(&server_ins, 
+                    UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_SIGNATURE,
+                    UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID,
+                    &transfer_id,
+                    CANARD_TRANSFER_PRIORITY_MEDIUM,
+                    buffer,
+                    len);
+
+    // 4. 注入帧 (libcanard 会自动处理多帧重组)
+    printf("Injecting Allocation Response (Allocated ID: 42)...\r\n");
+    inject_rx_frame_from_server(&server_ins, HAL_GetTick() * 1000);
+
+    // 5. 检查结果
+    uint8_t new_id = canardDynIDClientGetNodeID(&dynid_client);
+    printf("Client State ID: %d\r\n", new_id);
+    
+    if (new_id == 42) {
+        printf("SUCCESS: Dynamic ID Allocation Logic Verified!\r\n");
+        // 模拟主循环：应用分配到的 ID
+        canardSetLocalNodeID(&canard_ins, new_id);
+    } else {
+        printf("FAILURE: Client did not accept the ID.\r\n");
+    }
+    
+    printf("=== Dynamic ID Test Finished ===\r\n\r\n");
+}
+
+// --- 电机控制测试函数 (修复版) ---
+void inject_actuator_command(uint8_t actuator_id, float value) {
+    // 创建临时服务器
+    CanardInstance server_ins;
+    uint8_t server_mem[512];
+    canardInit(&server_ins, server_mem, sizeof(server_mem), NULL, NULL, NULL);
+    canardSetLocalNodeID(&server_ins, 42); // 模拟发送者 ID
+
     uavcan_equipment_actuator_ArrayCommand cmd;
-    uavcan_equipment_actuator_Command cmd_data[1]; // 创建一个静态数组来存储命令数据
+    uavcan_equipment_actuator_Command cmd_data[1];
     cmd.commands.len = 1;
-    cmd.commands.data = cmd_data; // 将指针指向静态数组
-    cmd.commands.data[0].actuator_id = 0;       // 控制第1个电机
-    cmd.commands.data[0].command_type = 0;   // UNITLESS
-    cmd.commands.data[0].command_value = 0.5f;  // 50% 油门 (预期脉宽 1750us)
+    cmd.commands.data = cmd_data;
+    cmd.commands.data[0].actuator_id = actuator_id;
+    cmd.commands.data[0].command_type = 0;
+    cmd.commands.data[0].command_value = value;
 
     uint8_t buffer[UAVCAN_EQUIPMENT_ACTUATOR_ARRAYCOMMAND_MAX_SIZE];
     uint32_t len = uavcan_equipment_actuator_ArrayCommand_encode(&cmd, buffer);
 
-    // 3. 添加 UAVCAN 传输层尾字节 (Tail Byte)
-    // 单帧传输: Start=1, End=1, Toggle=0, TID=0 => 0xC0
-    buffer[len] = 0xC0; 
-    len++;
+    static uint8_t transfer_id = 0;
+    canardBroadcast(&server_ins, 
+                    UAVCAN_EQUIPMENT_ACTUATOR_ARRAYCOMMAND_SIGNATURE,
+                    UAVCAN_EQUIPMENT_ACTUATOR_ARRAYCOMMAND_ID,
+                    &transfer_id,
+                    CANARD_TRANSFER_PRIORITY_MEDIUM,
+                    buffer,
+                    len);
 
-    // 4. 构造 CAN 帧
-    CanardCANFrame frame;
-    // ID结构: Priority(5) | MsgID(16) | SourceID(7)
-    // Priority=Medium(16), MsgID=1010 (ArrayCommand), SourceID=42 (模拟发送者)
-    frame.id = (CANARD_TRANSFER_PRIORITY_MEDIUM << 24) | 
-               (UAVCAN_EQUIPMENT_ACTUATOR_ARRAYCOMMAND_ID << 8) | 
-               42;
-    frame.id |= CANARD_CAN_FRAME_EFF; // 扩展帧标志
-    frame.data_len = len;
-    memcpy(frame.data, buffer, len);
+    printf("Injecting CMD: ID=%d, Val=%.2f -> ", actuator_id, value);
+    inject_rx_frame_from_server(&server_ins, HAL_GetTick() * 1000);
+}
 
-    // 5. 注入到协议栈
-    printf("Injecting fake CAN frame (ID: 0x%X, Len: %d)...\r\n", frame.id, frame.data_len);
-    canardHandleRxFrame(&canard_ins, &frame, HAL_GetTick() * 1000);
+// --- 综合测试函数 ---
+void run_parsing_test(void) {
+    // 1. 先测试动态 ID 分配
+    run_dynamic_id_test();
 
-    // 6. 恢复原来的节点ID状态
-    canardSetLocalNodeID(&canard_ins, original_node_id);
-    
-    printf("=== Test Finished ===\r\n\r\n");
+    // 2. 如果 ID 分配成功，测试电机控制
+    if (canardGetLocalNodeID(&canard_ins) != CANARD_BROADCAST_NODE_ID) {
+        printf("=== Running Motor Control Test ===\r\n");
+        inject_actuator_command(0, -1.0f);
+        inject_actuator_command(1, 1.0f);
+        inject_actuator_command(2, 0.0f);
+        inject_actuator_command(3, 0.5f);
+        printf("=== Motor Test Finished ===\r\n");
+    } else {
+        printf("Skipping Motor Test (No ID assigned)\r\n");
+    }
 }
 /* USER CODE END 0 */
 
@@ -230,12 +297,10 @@ int main(void)
 						sizeof(canard_memory_pool),
 						onTransferReception,
 						shouldAcceptTransfer,
-						NULL);
+          NULL);
 
-	// 初始化动态ID客户端
-	canardDynIDClientInit(&dynid_client, node_unique_id);
-	// 设置本地节点ID为匿名
-	canardSetLocalNodeID(&canard_ins, CANARD_BROADCAST_NODE_ID);
+  // 固定节点ID为40，跳过动态分配流程
+  canardSetLocalNodeID(&canard_ins, 40);
 
 	// 初始化CAN过滤器
 	CAN_FilterTypeDef filter;
@@ -259,46 +324,10 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-	// 启动动态ID分配过程
-	if (canardDynIDClientStart(&dynid_client, &canard_ins, 0) < 0)
-	{
-			// 错误处理
-			printf("Failed to start dynamic ID allocation\r\n");
-			Error_Handler();
-	}
-
-    // 运行自检测试
-    //run_parsing_test();
-
-    static uint32_t last_allocation_request_time = 0;
   while (1)
   {
-		// 等待动态ID分配完成
-		while(canardDynIDClientGetNodeID(&dynid_client) == CANARD_BROADCAST_NODE_ID)
-		{
-                // 每隔1秒重发一次分配请求
-                if (HAL_GetTick() - last_allocation_request_time > 1000)
-                {
-                    int16_t res = canardDynIDClientStart(&dynid_client, &canard_ins, 0);
-                    last_allocation_request_time = HAL_GetTick();
-                    printf("Requesting ID... Res: %d\r\n", res);
-                }
-
-				processCanTxQueue(); // 持续处理发送队列
-
-				HAL_Delay(10); // 短暂延迟
-		}
-
-		// ID分配成功，设置节点ID
-		if (canardGetLocalNodeID(&canard_ins) == CANARD_BROADCAST_NODE_ID)
-		{
-				uint8_t allocated_id = canardDynIDClientGetNodeID(&dynid_client);
-				canardSetLocalNodeID(&canard_ins, allocated_id);
-				printf("Node ID allocated: %d\r\n", allocated_id);
-		}
-
-    // 处理发送队列
-    processCanTxQueue();
+    // 固定ID模式：直接处理发送队列
+      processCanTxQueue();
     
     // 发送心跳包 (1Hz)
     static uint32_t last_node_status_time = 0;
