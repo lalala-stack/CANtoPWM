@@ -589,15 +589,15 @@ bool shouldAcceptTransfer(const CanardInstance* ins,
                          CanardTransferType transfer_type,
                          uint8_t source_node_id) {
     
-            // 只有在接收到关键服务请求时才打印，避免刷屏
-            if (data_type_id == UAVCAN_PROTOCOL_GETNODEINFO_ID || data_type_id == UAVCAN_PROTOCOL_PARAM_GETSET_ID) {
-                printf("Accept: ID=%d Type=%d Src=%d\r\n", data_type_id, transfer_type, source_node_id);
-            }
+    // 只有在接收到关键服务请求时才打印，避免刷屏
+    if (data_type_id == UAVCAN_PROTOCOL_GETNODEINFO_ID || data_type_id == UAVCAN_PROTOCOL_PARAM_GETSET_ID) {
+         printf("Accept: ID=%d Type=%d Src=%d\r\n", data_type_id, transfer_type, source_node_id);
+    }
 
-            // Debug: 观测 RawCommand 是否进入过滤逻辑
-            if (data_type_id == UAVCAN_EQUIPMENT_ESC_RAWCOMMAND_ID) {
-                printf("Seen RawCommand ID=1030 Type=%d Src=%d\r\n", transfer_type, source_node_id);
-            }
+        // Debug: 观测 RawCommand 是否进入过滤逻辑
+        if (data_type_id == UAVCAN_EQUIPMENT_ESC_RAWCOMMAND_ID) {
+            printf("Seen RawCommand ID=1030 Type=%d Src=%d\r\n", transfer_type, source_node_id);
+        }
 
     (void)ins;
 		(void)source_node_id;
@@ -637,6 +637,7 @@ bool shouldAcceptTransfer(const CanardInstance* ins,
     
     // GetNodeInfo Request (Service ID=1)
     if (data_type_id == UAVCAN_PROTOCOL_GETNODEINFO_ID && transfer_type == CanardTransferTypeRequest) {
+        printf("Accept GetNodeInfo Req\r\n"); // Debug
         *out_data_type_signature = UAVCAN_PROTOCOL_GETNODEINFO_SIGNATURE;
         return true;
     }
@@ -650,7 +651,7 @@ bool shouldAcceptTransfer(const CanardInstance* ins,
 
     // Param GetSet
     if (data_type_id == UAVCAN_PROTOCOL_PARAM_GETSET_ID) {
-        printf("Accept Param Req\r\n"); // Debug
+        // printf("Accept Param Req\r\n"); // Debug
         *out_data_type_signature = UAVCAN_PROTOCOL_PARAM_GETSET_SIGNATURE;
         return true;
     }
@@ -734,10 +735,10 @@ void processActuatorCommands(uavcan_equipment_actuator_ArrayCommand* cmd) {
         if (pulse < 1000) pulse = 1000;
         if (pulse > 2000) pulse = 2000;
 
-         printf("  - Actuator ID: %d, Value: %f, Pulse: %d us\r\n", 
-             single_cmd->actuator_id, 
-             single_cmd->command_value, 
-             pulse);
+        printf("  - Actuator ID: %d, Value: %f, Pulse: %d us\r\n", 
+               single_cmd->actuator_id, 
+               single_cmd->command_value, 
+               pulse);
 
         // 根据 actuator_id 更新对应的 PWM 通道
         // 假设 actuator_id 0-3 对应 TIM2_CH1-4
@@ -827,8 +828,8 @@ void processCanTxQueue(void) {
         };
         
         uint32_t mailbox;
-        // Debug: 如需查看发送帧可打开
-        // printf("TX ID: 0x%08X DLC:%d\r\n", tx_header.ExtId, tx_header.DLC);
+        // Debug: 打印发送的 CAN ID 和长度
+        printf("TX ID: 0x%08X DLC:%d\r\n", tx_header.ExtId, tx_header.DLC);
         // 若是服务响应帧，DataTypeID=1/目标节点等会体现在 tx_header.ExtId 中
         // 可根据需要展开 tx_frame->data 观察碎片
         
