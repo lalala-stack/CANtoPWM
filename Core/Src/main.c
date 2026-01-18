@@ -100,6 +100,7 @@ static ParamEntry params[PARAM_COUNT] = {
     {"can_node_id", 60.0f, 1.0f, 127.0f, 60.0f, true},
     {"actuator_id_offset", 0.0f, 0.0f, 10.0f, 0.0f, true}
 };
+static int8_t pending_node_id = -1; // defer ID change until outside ISR to avoid fragment drop
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -354,6 +355,14 @@ int main(void)
   {
     // 固定ID模式：直接处理发送队列
       processCanTxQueue();
+
+    // 如果有待应用的节点ID，移到主循环中执行，避免在服务传输过程中切换导致分片被拒绝
+    if (pending_node_id >= CANARD_MIN_NODE_ID && pending_node_id <= CANARD_MAX_NODE_ID) {
+        uint8_t new_id = (uint8_t)pending_node_id;
+        canardSetLocalNodeID(&canard_ins, new_id);
+        pending_node_id = -1;
+        printf("[Param] Applied Node ID = %d\r\n", new_id);
+    }
     
     // 发送心跳包 (1Hz)
     static uint32_t last_node_status_time = 0;
@@ -478,6 +487,8 @@ void handleParamGetSet(CanardInstance* ins, CanardRxTransfer* transfer) {
      static uavcan_protocol_param_GetSetRequest req;
      static uint8_t name_buf[92]; 
      uint8_t* p_name_buf = name_buf;
+    memset(&req, 0, sizeof(req));
+    memset(name_buf, 0, sizeof(name_buf));
      
      if (uavcan_protocol_param_GetSetRequest_decode(transfer, transfer->payload_len, &req, &p_name_buf) < 0) {
          printf("[Param] Decode Failed\r\n");
@@ -485,10 +496,18 @@ void handleParamGetSet(CanardInstance* ins, CanardRxTransfer* transfer) {
      }
 
      if(req.name.len > 0) {
-         printf("[Param] Request Name: %.*s\r\n", req.name.len, req.name.data);
+         printf("[Param] Request Name(len=%d): %.*s\r\n", req.name.len, req.name.len, req.name.data);
      } else {
          printf("[Param] Request Index: %d\r\n", req.index);
      }
+
+     // Debug: observe incoming value type/payload to diagnose GUI writes
+     printf("[Param] union_tag=%d int=%lld real=%.3f bool=%d payload_len=%lu\r\n",
+            req.value.union_tag,
+            (long long)req.value.integer_value,
+            req.value.real_value,
+            req.value.boolean_value,
+            (unsigned long)transfer->payload_len);
 
      ParamEntry* found = NULL;
 
@@ -510,6 +529,7 @@ void handleParamGetSet(CanardInstance* ins, CanardRxTransfer* transfer) {
 
      // If found and value is set (not empty), update it
      if (found && req.value.union_tag != UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY) {
+         printf("[Param] union_tag=%d\r\n", req.value.union_tag);
          if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE) {
              found->value = (float)req.value.integer_value;
          } else if (req.value.union_tag == UAVCAN_PROTOCOL_PARAM_VALUE_REAL_VALUE) {
@@ -520,15 +540,19 @@ void handleParamGetSet(CanardInstance* ins, CanardRxTransfer* transfer) {
          
          if (found->value < found->min) found->value = found->min;
          if (found->value > found->max) found->value = found->max;
+         if (found->is_integer) {
+             // 四舍五入确保整数参数精确
+             found->value = (float)((int32_t)(found->value + (found->value >= 0 ? 0.5f : -0.5f)));
+         }
          
          printf("[Param] Set %s = %f\r\n", found->name, found->value);
 
-         // 如果修改了 can_node_id，立即应用到本地节点 ID
+         // 如果修改了 can_node_id，标记为待应用，避免在当前传输中途切换 ID 导致后续分片被拒绝
          if (strcmp(found->name, "can_node_id") == 0) {
              uint8_t new_id = (uint8_t)found->value;
              if (new_id >= CANARD_MIN_NODE_ID && new_id <= CANARD_MAX_NODE_ID) {
-                 canardSetLocalNodeID(&canard_ins, new_id);
-                 printf("[Param] Applied Node ID = %d\r\n", new_id);
+                 pending_node_id = (int8_t)new_id;
+                 printf("[Param] Pending Node ID = %d (will apply after handler)\r\n", new_id);
              } else {
                  printf("[Param] Node ID out of range: %d\r\n", new_id);
              }
@@ -565,6 +589,7 @@ void handleParamGetSet(CanardInstance* ins, CanardRxTransfer* transfer) {
         }
      } else {
          resp.value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_EMPTY;
+         printf("[Param] Not found, reply empty\r\n");
      }
 
      static uint8_t buffer[UAVCAN_PROTOCOL_PARAM_GETSET_RESPONSE_MAX_SIZE];
@@ -579,7 +604,11 @@ void handleParamGetSet(CanardInstance* ins, CanardRxTransfer* transfer) {
                            CanardResponse,
                            buffer,
                            len);
-      if(res <= 0) printf("[Param] Reply Failed: %d\r\n", res);
+     if(res <= 0) {
+         printf("[Param] Reply Failed: %d\r\n", res);
+     } else {
+         printf("[Param] Reply len=%lu queued\r\n", (unsigned long)len);
+     }
 }
 
 // 决定是否接受某个传输的回调函数
@@ -589,15 +618,7 @@ bool shouldAcceptTransfer(const CanardInstance* ins,
                          CanardTransferType transfer_type,
                          uint8_t source_node_id) {
     
-    // 只有在接收到关键服务请求时才打印，避免刷屏
-    if (data_type_id == UAVCAN_PROTOCOL_GETNODEINFO_ID || data_type_id == UAVCAN_PROTOCOL_PARAM_GETSET_ID) {
-         printf("Accept: ID=%d Type=%d Src=%d\r\n", data_type_id, transfer_type, source_node_id);
-    }
-
-        // Debug: 观测 RawCommand 是否进入过滤逻辑
-        if (data_type_id == UAVCAN_EQUIPMENT_ESC_RAWCOMMAND_ID) {
-            printf("Seen RawCommand ID=1030 Type=%d Src=%d\r\n", transfer_type, source_node_id);
-        }
+    // Debug打印关闭以减少中断内耗时，避免丢帧
 
     (void)ins;
 		(void)source_node_id;
@@ -828,14 +849,17 @@ void processCanTxQueue(void) {
         };
         
         uint32_t mailbox;
-        // Debug: 打印发送的 CAN ID 和长度
-        printf("TX ID: 0x%08X DLC:%d\r\n", tx_header.ExtId, tx_header.DLC);
-        // 若是服务响应帧，DataTypeID=1/目标节点等会体现在 tx_header.ExtId 中
-        // 可根据需要展开 tx_frame->data 观察碎片
-        
-        // 尝试等待有空闲邮箱
-        uint32_t retry = 0;
-        while(HAL_CAN_GetTxMailboxesFreeLevel(&hcan) == 0 && retry < 1000) { retry++; }
+
+        // 等待有空闲邮箱；若短暂等待后仍满，微延时让仲裁/邮箱释放，再尝试几次
+        uint32_t wait_attempts = 0;
+        while (HAL_CAN_GetTxMailboxesFreeLevel(&hcan) == 0 && wait_attempts < 5) {
+            HAL_Delay(1); // 1ms 让出 CPU，避免忙等
+            wait_attempts++;
+        }
+        if (HAL_CAN_GetTxMailboxesFreeLevel(&hcan) == 0) {
+            // 邮箱仍满，留到下一次循环继续发送
+            return;
+        }
 
         if (HAL_CAN_AddTxMessage(&hcan, &tx_header, tx_frame->data, &mailbox) == HAL_OK) {
             // 成功发送，从队列移除
@@ -845,8 +869,7 @@ void processCanTxQueue(void) {
             uint32_t err = HAL_CAN_GetError(&hcan);
             uint32_t free_level = HAL_CAN_GetTxMailboxesFreeLevel(&hcan);
             printf("CAN Tx Fail. Err: 0x%X, FreeMB: %d, ESR: 0x%X\r\n", err, free_level, hcan.Instance->ESR);
-            
-            // 如果是邮箱满，就不需要一直打印了，直接退出等待下一次
+            // 如果失败（含邮箱满/仲裁等），退出等待下一次主循环再尝试
             break;
         }
         
@@ -941,8 +964,26 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
         
         uint64_t timestamp_us = HAL_GetTick() * 1000;
         int16_t cr = canardHandleRxFrame(&canard_ins, &rx_frame, timestamp_us);
-        if (cr < 0) {
-            printf("canardHandleRxFrame err=%d\r\n", cr);
+        if (cr < 0 && cr != -CANARD_ERROR_RX_NOT_WANTED) {
+            uint8_t tail = rx_data[rx_header.DLC ? (rx_header.DLC - 1) : 0];
+            uint8_t start = (tail >> 7) & 1;
+            uint8_t end   = (tail >> 6) & 1;
+            uint8_t tog   = (tail >> 5) & 1;
+            uint8_t tid   = tail & 0x1F;
+            uint8_t src   = (uint8_t)(rx_header.ExtId & 0x7F);
+            uint16_t dtype = (uint16_t)((rx_header.ExtId >> 8) & 0xFFFF);
+            printf("canardHandleRxFrame err=%d id=0x%08lX dlc=%d src=%d dtype=%u tail=%02X s=%d e=%d t=%d tid=%d bytes:%02X %02X %02X %02X %02X %02X %02X %02X\r\n",
+                   cr,
+                   (unsigned long)rx_header.ExtId,
+                   rx_header.DLC,
+                   src,
+                   dtype,
+                   tail,
+                   start,
+                   end,
+                   tog,
+                   tid,
+                   rx_data[0], rx_data[1], rx_data[2], rx_data[3], rx_data[4], rx_data[5], rx_data[6], rx_data[7]);
         }
     }
 }
