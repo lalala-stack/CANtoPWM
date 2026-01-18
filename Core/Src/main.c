@@ -104,6 +104,7 @@ static ParamEntry params[PARAM_COUNT] = {
     {"ch3_map", 3.0f, -1.0f, 3.0f, 3.0f, true}
 };
 static int8_t pending_node_id = -1; // defer ID change until outside ISR to avoid fragment drop
+static float tim2_ticks_per_us = 1.0f; // updated at init to scale 1-2ms to CCR
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -111,6 +112,8 @@ void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
 void read_unique_id(uint8_t* out_uid);
 static int32_t get_mapped_channel(uint8_t logical_index);
+static void update_tim2_tick_scale(void);
+static uint32_t pulse_us_to_ticks(uint16_t pulse_us);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -314,6 +317,9 @@ int main(void)
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
+
+    // 根据当前 PCLK1/预分频计算 TIM2 每微秒的计数，确保无论周期如何调整都能输出 1-2ms 脉宽
+    update_tim2_tick_scale();
 
   // 初始化libcanard
 	canardInit(&canard_ins,
@@ -754,17 +760,18 @@ void processActuatorCommands(uavcan_equipment_actuator_ArrayCommand* cmd) {
         
         // 将标准化的 command_value (-1.0 to 1.0) 转换为 PWM 脉宽 (1000 to 2000)
         // 1500 是中立点 (1.5ms), 500 是变化范围 (0.5ms)
-        uint16_t pulse = 1500 + (uint16_t)(single_cmd->command_value * 500.0f);
+        uint16_t pulse_us = 1500 + (uint16_t)(single_cmd->command_value * 500.0f);
 
         // 限制脉宽在安全范围内 (例如 1000-2000)
-        if (pulse < 1000) pulse = 1000;
-        if (pulse > 2000) pulse = 2000;
+        if (pulse_us < 1000) pulse_us = 1000;
+        if (pulse_us > 2000) pulse_us = 2000;
 
         int32_t ch = get_mapped_channel(single_cmd->actuator_id);
+        uint32_t ccr = pulse_us_to_ticks(pulse_us);
         printf("  - Actuator ID: %d -> CH%ld, Value: %f, Pulse: %d us\r\n", 
                single_cmd->actuator_id, (long)ch,
                single_cmd->command_value, 
-               pulse);
+               pulse_us);
 
         if (ch < 0 || ch > 3) {
             continue; // 映射为关闭或越界则忽略
@@ -772,16 +779,16 @@ void processActuatorCommands(uavcan_equipment_actuator_ArrayCommand* cmd) {
 
         switch (ch) {
             case 0:
-                __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, pulse);
+                __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, ccr);
                 break;
             case 1:
-                __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pulse);
+                __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, ccr);
                 break;
             case 2:
-                __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, pulse);
+                __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, ccr);
                 break;
             case 3:
-                __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, pulse);
+                __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, ccr);
                 break;
             default:
                 break;
@@ -796,6 +803,20 @@ static int32_t get_mapped_channel(uint8_t logical_index) {
     }
     float v = params[1 + logical_index].value;
     return (int32_t)(v + (v >= 0 ? 0.5f : -0.5f));
+}
+
+// 根据当前 TIM2 预分频和时钟，更新每微秒的计数刻度
+static void update_tim2_tick_scale(void) {
+    uint32_t pclk1 = HAL_RCC_GetPCLK1Freq();
+    uint32_t tim_clk = pclk1;
+    if ((RCC->CFGR & RCC_CFGR_PPRE1) != RCC_CFGR_PPRE1_DIV1) {
+        tim_clk *= 2U; // APB1 分频不为1时，定时器时钟翻倍
+    }
+    tim2_ticks_per_us = (float)tim_clk / (float)(htim2.Init.Prescaler + 1U) / 1000000.0f;
+}
+
+static uint32_t pulse_us_to_ticks(uint16_t pulse_us) {
+    return (uint32_t)((float)pulse_us * tim2_ticks_per_us);
 }
 
 // 处理 ESC RawCommand：将 int14[-8192,8191] 归一化到 -1..1 再映射 PWM
@@ -814,7 +835,8 @@ void processEscRawCommand(uavcan_equipment_esc_RawCommand* raw) {
         if (pulse > 2000) pulse = 2000;
 
         int32_t ch = get_mapped_channel(i);
-        printf("  - ESC[%d]=>CH%ld rc=%d norm=%.3f pulse=%u us\r\n", i, (long)ch, rc, norm, pulse);
+        uint32_t ccr = pulse_us_to_ticks(pulse);
+        printf("  - ESC[%d]=>CH%ld rc=%d norm=%.3f pulse=%u us (ccr=%lu)\r\n", i, (long)ch, rc, norm, pulse, (unsigned long)ccr);
 
         if (ch < 0 || ch > 3) {
             continue; // 超出映射范围则忽略
@@ -822,16 +844,16 @@ void processEscRawCommand(uavcan_equipment_esc_RawCommand* raw) {
 
         switch (ch) {
             case 0:
-                __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, pulse);
+                __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, ccr);
                 break;
             case 1:
-                __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pulse);
+                __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, ccr);
                 break;
             case 2:
-                __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, pulse);
+                __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, ccr);
                 break;
             case 3:
-                __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, pulse);
+                __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, ccr);
                 break;
             default:
                 break;

@@ -81,7 +81,7 @@
           </BeforeMake>
           <AfterMake>
             <RunUserProg1>0</RunUserProg1>
-            <RunUserProg2>0</RunUserProg2>
+            <RunUserProg2>1</RunUserProg2>
             <UserProg1Name></UserProg1Name>
             <UserProg2Name></UserProg2Name>
             <UserProg1Dos16Mode>0</UserProg1Dos16Mode>
@@ -415,6 +415,61 @@
               <FilePath>..\Core\include\uavcan\equipment\actuator\actuator_Status.c</FilePath>
             </File>
             <File>
+              <FileName>canard_dynamic_node_id_client.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\canard_dynamic_node_id_client.c</FilePath>
+            </File>
+            <File>
+              <FileName>dynamic_node_id_Allocation.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\include\uavcan\protocol\dynamic_node_id\dynamic_node_id_Allocation.c</FilePath>
+            </File>
+            <File>
+              <FileName>protocol_NodeStatus.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\include\uavcan\protocol\protocol_NodeStatus.c</FilePath>
+            </File>
+            <File>
+              <FileName>param_Empty.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\include\uavcan\protocol\param\param_Empty.c</FilePath>
+            </File>
+            <File>
+              <FileName>param_GetSet.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\include\uavcan\protocol\param\param_GetSet.c</FilePath>
+            </File>
+            <File>
+              <FileName>param_NumericValue.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\include\uavcan\protocol\param\param_NumericValue.c</FilePath>
+            </File>
+            <File>
+              <FileName>param_Value.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\include\uavcan\protocol\param\param_Value.c</FilePath>
+            </File>
+            <File>
+              <FileName>protocol_GetNodeInfo.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\include\uavcan\protocol\protocol_GetNodeInfo.c</FilePath>
+            </File>
+            <File>
+              <FileName>protocol_HardwareVersion.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\include\uavcan\protocol\protocol_HardwareVersion.c</FilePath>
+            </File>
+            <File>
+              <FileName>protocol_SoftwareVersion.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\include\uavcan\protocol\protocol_SoftwareVersion.c</FilePath>
+            </File>
+            <File>
+              <FileName>esc_RawCommand.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\include\uavcan\equipment\esc\esc_RawCommand.c</FilePath>
+            </File>
+            <File>
               <FileName>main.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/main.c</FilePath>
@@ -499,61 +554,6 @@
               <FileName>stm32f1xx_hal_msp.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/stm32f1xx_hal_msp.c</FilePath>
-            </File>
-            <File>
-              <FileName>canard_dynamic_node_id_client.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Core\Src\canard_dynamic_node_id_client.c</FilePath>
-            </File>
-            <File>
-              <FileName>dynamic_node_id_Allocation.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Core\include\uavcan\protocol\dynamic_node_id\dynamic_node_id_Allocation.c</FilePath>
-            </File>
-            <File>
-              <FileName>protocol_NodeStatus.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Core\include\uavcan\protocol\protocol_NodeStatus.c</FilePath>
-            </File>
-            <File>
-              <FileName>param_Empty.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Core\include\uavcan\protocol\param\param_Empty.c</FilePath>
-            </File>
-            <File>
-              <FileName>param_GetSet.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Core\include\uavcan\protocol\param\param_GetSet.c</FilePath>
-            </File>
-            <File>
-              <FileName>param_NumericValue.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Core\include\uavcan\protocol\param\param_NumericValue.c</FilePath>
-            </File>
-            <File>
-              <FileName>param_Value.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Core\include\uavcan\protocol\param\param_Value.c</FilePath>
-            </File>
-            <File>
-              <FileName>protocol_GetNodeInfo.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Core\include\uavcan\protocol\protocol_GetNodeInfo.c</FilePath>
-            </File>
-            <File>
-              <FileName>protocol_HardwareVersion.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Core\include\uavcan\protocol\protocol_HardwareVersion.c</FilePath>
-            </File>
-            <File>
-              <FileName>protocol_SoftwareVersion.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Core\include\uavcan\protocol\protocol_SoftwareVersion.c</FilePath>
-            </File>
-            <File>
-              <FileName>esc_RawCommand.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Core\include\uavcan\equipment\esc\esc_RawCommand.c</FilePath>
             </File>
           </Files>
         </Group>
