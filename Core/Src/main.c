@@ -95,10 +95,13 @@ typedef struct {
     bool is_integer; // 简单的类型标记
 } ParamEntry;
 
-#define PARAM_COUNT 2
+#define PARAM_COUNT 5
 static ParamEntry params[PARAM_COUNT] = {
     {"can_node_id", 60.0f, 1.0f, 127.0f, 60.0f, true},
-    {"actuator_id_offset", 0.0f, 0.0f, 10.0f, 0.0f, true}
+    {"ch0_map", 0.0f, -1.0f, 3.0f, 0.0f, true},
+    {"ch1_map", 1.0f, -1.0f, 3.0f, 1.0f, true},
+    {"ch2_map", 2.0f, -1.0f, 3.0f, 2.0f, true},
+    {"ch3_map", 3.0f, -1.0f, 3.0f, 3.0f, true}
 };
 static int8_t pending_node_id = -1; // defer ID change until outside ISR to avoid fragment drop
 /* USER CODE END PV */
@@ -107,6 +110,7 @@ static int8_t pending_node_id = -1; // defer ID change until outside ISR to avoi
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
 void read_unique_id(uint8_t* out_uid);
+static int32_t get_mapped_channel(uint8_t logical_index);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -756,14 +760,17 @@ void processActuatorCommands(uavcan_equipment_actuator_ArrayCommand* cmd) {
         if (pulse < 1000) pulse = 1000;
         if (pulse > 2000) pulse = 2000;
 
-        printf("  - Actuator ID: %d, Value: %f, Pulse: %d us\r\n", 
-               single_cmd->actuator_id, 
+        int32_t ch = get_mapped_channel(single_cmd->actuator_id);
+        printf("  - Actuator ID: %d -> CH%ld, Value: %f, Pulse: %d us\r\n", 
+               single_cmd->actuator_id, (long)ch,
                single_cmd->command_value, 
                pulse);
 
-        // 根据 actuator_id 更新对应的 PWM 通道
-        // 假设 actuator_id 0-3 对应 TIM2_CH1-4
-        switch (single_cmd->actuator_id) {
+        if (ch < 0 || ch > 3) {
+            continue; // 映射为关闭或越界则忽略
+        }
+
+        switch (ch) {
             case 0:
                 __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, pulse);
                 break;
@@ -777,23 +784,23 @@ void processActuatorCommands(uavcan_equipment_actuator_ArrayCommand* cmd) {
                 __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, pulse);
                 break;
             default:
-                // 其他 actuator_id 不处理
                 break;
         }
     }
 }
 
-static int32_t get_actuator_offset(void) {
-    // 使用参数表里的 actuator_id_offset，做四舍五入取整
-    float v = params[1].value;
+static int32_t get_mapped_channel(uint8_t logical_index) {
+    // logical_index 0..3 对应 ch0_map..ch3_map；值 -1 关闭，0..3 直连通道
+    if (logical_index >= 4) {
+        return -1;
+    }
+    float v = params[1 + logical_index].value;
     return (int32_t)(v + (v >= 0 ? 0.5f : -0.5f));
 }
 
 // 处理 ESC RawCommand：将 int14[-8192,8191] 归一化到 -1..1 再映射 PWM
 void processEscRawCommand(uavcan_equipment_esc_RawCommand* raw) {
     printf("Received ESC RawCommand with %d entries:\r\n", raw->cmd.len);
-
-    const int32_t offset = get_actuator_offset();
 
     for (uint8_t i = 0; i < raw->cmd.len && i < 4; i++) {
         int16_t rc = raw->cmd.data[i];
@@ -806,7 +813,7 @@ void processEscRawCommand(uavcan_equipment_esc_RawCommand* raw) {
         if (pulse < 1000) pulse = 1000;
         if (pulse > 2000) pulse = 2000;
 
-        int32_t ch = (int32_t)i + offset;
+        int32_t ch = get_mapped_channel(i);
         printf("  - ESC[%d]=>CH%ld rc=%d norm=%.3f pulse=%u us\r\n", i, (long)ch, rc, norm, pulse);
 
         if (ch < 0 || ch > 3) {
