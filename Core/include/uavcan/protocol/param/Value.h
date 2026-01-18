@@ -16,7 +16,7 @@
 extern "C"
 {
 #endif
-
+#pragma anon_unions
 #include <uavcan\protocol\param\Empty.h>
 
 /******************************* Source text **********************************

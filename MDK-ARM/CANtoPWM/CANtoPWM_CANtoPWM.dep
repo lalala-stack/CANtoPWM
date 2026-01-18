@@ -1,7 +1,7 @@
 Dependencies for Project 'CANtoPWM', Target 'CANtoPWM': (DO NOT MODIFY !)
 CompilerVersion: 5060960::V5.06 update 7 (build 960)::.\ArmCompiler506
 F (startup_stm32f103xb.s)(0x69194382)(--cpu Cortex-M3 --pd "__EVAL SETA 1" -g --apcs=interwork --pd "__MICROLIB SETA 1"-I.\RTE\_CANtoPWM-IE:\MyApp\Keil\Pack\ARM\CMSIS\6.2.0\CMSIS\Core\Include-IE:\MyApp\Keil\Pack\Keil\STM32F1xx_DFP\2.4.1\Device\Include--pd "__UVISION_VERSION SETA 543" --pd "STM32F10X_MD SETA 1" --pd "_RTE_ SETA 1"--list startup_stm32f103xb.lst --xref -o cantopwm\startup_stm32f103xb.o --depend cantopwm\startup_stm32f103xb.d)
-F (..\Core\Src\canard.c)(0x68EA48F7)(--c99 -c --cpu Cortex-M3 -D__EVAL -D__MICROLIB -g -O1 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F1xx/Include -I ../Drivers/CMSIS/Include -I ../Core/include-I.\RTE\_CANtoPWM-IE:\MyApp\Keil\Pack\ARM\CMSIS\6.2.0\CMSIS\Core\Include-IE:\MyApp\Keil\Pack\Keil\STM32F1xx_DFP\2.4.1\Device\Include-D__UVISION_VERSION="543" -DSTM32F10X_MD -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F103xB-o cantopwm\canard.o --omf_browse cantopwm\canard.crf --depend cantopwm\canard.d)
+F (..\Core\Src\canard.c)(0x696C5744)(--c99 -c --cpu Cortex-M3 -D__EVAL -D__MICROLIB -g -O1 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F1xx/Include -I ../Drivers/CMSIS/Include -I ../Core/include-I.\RTE\_CANtoPWM-IE:\MyApp\Keil\Pack\ARM\CMSIS\6.2.0\CMSIS\Core\Include-IE:\MyApp\Keil\Pack\Keil\STM32F1xx_DFP\2.4.1\Device\Include-D__UVISION_VERSION="543" -DSTM32F10X_MD -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F103xB-o cantopwm\canard.o --omf_browse cantopwm\canard.crf --depend cantopwm\canard.d)
 I (../Core/Inc/canard_internals.h)(0x68EA48F7)
 I (../Core/Inc/canard.h)(0x69197D8C)
 I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdint.h)(0x5E8E3CC2)
@@ -31,7 +31,7 @@ I (../Core/Inc/canard.h)(0x69197D8C)
 I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stddef.h)(0x5E8E3CC2)
 I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdbool.h)(0x5E8E3CC2)
 I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\assert.h)(0x5E8E3CC2)
-F (../Core/Src/main.c)(0x69660358)(--c99 -c --cpu Cortex-M3 -D__EVAL -D__MICROLIB -g -O1 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F1xx/Include -I ../Drivers/CMSIS/Include -I ../Core/include-I.\RTE\_CANtoPWM-IE:\MyApp\Keil\Pack\ARM\CMSIS\6.2.0\CMSIS\Core\Include-IE:\MyApp\Keil\Pack\Keil\STM32F1xx_DFP\2.4.1\Device\Include-D__UVISION_VERSION="543" -DSTM32F10X_MD -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F103xB-o cantopwm\main.o --omf_browse cantopwm\main.crf --depend cantopwm\main.d)
+F (../Core/Src/main.c)(0x696C61FB)(--c99 -c --cpu Cortex-M3 -D__EVAL -D__MICROLIB -g -O1 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F1xx/Include -I ../Drivers/CMSIS/Include -I ../Core/include-I.\RTE\_CANtoPWM-IE:\MyApp\Keil\Pack\ARM\CMSIS\6.2.0\CMSIS\Core\Include-IE:\MyApp\Keil\Pack\Keil\STM32F1xx_DFP\2.4.1\Device\Include-D__UVISION_VERSION="543" -DSTM32F10X_MD -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F103xB-o cantopwm\main.o --omf_browse cantopwm\main.crf --depend cantopwm\main.d)
 I (../Core/Inc/main.h)(0x68E8D7A0)
 I (../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal.h)(0x68E8D798)
 I (../Core/Inc/stm32f1xx_hal_conf.h)(0x69193542)
@@ -72,7 +72,15 @@ I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\assert.h)(0x5E8E3CC2)
 I (../Core/Inc/canard_internals.h)(0x68EA48F7)
 I (../Core/include/uavcan/equipment/actuator/ArrayCommand.h)(0x68EB0F41)
 I (../Core/include/uavcan\equipment\actuator\Command.h)(0x68EB0F3E)
+I (../Core/include/uavcan/equipment/esc/RawCommand.h)(0x696C4CD0)
 I (../Core/include/uavcan/protocol/NodeStatus.h)(0x692BBD91)
+I (../Core/include/uavcan/protocol/GetNodeInfo.h)(0x696C4C83)
+I (../Core/include/uavcan\protocol\HardwareVersion.h)(0x696BA45E)
+I (../Core/include/uavcan\protocol\SoftwareVersion.h)(0x696BA45E)
+I (../Core/include/uavcan/protocol/param/GetSet.h)(0x696BA3F6)
+I (../Core/include/uavcan\protocol\param\NumericValue.h)(0x696BA3F6)
+I (../Core/include/uavcan\protocol\param\Empty.h)(0x696BA3F6)
+I (../Core/include/uavcan\protocol\param\Value.h)(0x696BA3F6)
 I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdio.h)(0x5E8E3CC2)
 I (../Core/Inc/canard_dynamic_node_id_client.h)(0x69197EC1)
 I (../Core/include/uavcan/protocol/dynamic_node_id/Allocation.h)(0x69197657)
@@ -279,6 +287,70 @@ I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdbool.h)(0x5E8E3CC2)
 I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\assert.h)(0x5E8E3CC2)
 F (..\Core\include\uavcan\protocol\protocol_NodeStatus.c)(0x67104F9E)(--c99 -c --cpu Cortex-M3 -D__EVAL -D__MICROLIB -g -O1 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F1xx/Include -I ../Drivers/CMSIS/Include -I ../Core/include-I.\RTE\_CANtoPWM-IE:\MyApp\Keil\Pack\ARM\CMSIS\6.2.0\CMSIS\Core\Include-IE:\MyApp\Keil\Pack\Keil\STM32F1xx_DFP\2.4.1\Device\Include-D__UVISION_VERSION="543" -DSTM32F10X_MD -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F103xB-o cantopwm\protocol_nodestatus.o --omf_browse cantopwm\protocol_nodestatus.crf --depend cantopwm\protocol_nodestatus.d)
 I (../Core/include/uavcan\protocol\NodeStatus.h)(0x692BBD91)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdint.h)(0x5E8E3CC2)
+I (../Core/Inc/canard.h)(0x69197D8C)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stddef.h)(0x5E8E3CC2)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdbool.h)(0x5E8E3CC2)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\assert.h)(0x5E8E3CC2)
+F (..\Core\include\uavcan\protocol\param\param_Empty.c)(0x67104F9E)(--c99 -c --cpu Cortex-M3 -D__EVAL -D__MICROLIB -g -O1 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F1xx/Include -I ../Drivers/CMSIS/Include -I ../Core/include-I.\RTE\_CANtoPWM-IE:\MyApp\Keil\Pack\ARM\CMSIS\6.2.0\CMSIS\Core\Include-IE:\MyApp\Keil\Pack\Keil\STM32F1xx_DFP\2.4.1\Device\Include-D__UVISION_VERSION="543" -DSTM32F10X_MD -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F103xB-o cantopwm\param_empty.o --omf_browse cantopwm\param_empty.crf --depend cantopwm\param_empty.d)
+I (../Core/include/uavcan\protocol\param\Empty.h)(0x696BA3F6)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdint.h)(0x5E8E3CC2)
+I (../Core/Inc/canard.h)(0x69197D8C)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stddef.h)(0x5E8E3CC2)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdbool.h)(0x5E8E3CC2)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\assert.h)(0x5E8E3CC2)
+F (..\Core\include\uavcan\protocol\param\param_GetSet.c)(0x67104F9E)(--c99 -c --cpu Cortex-M3 -D__EVAL -D__MICROLIB -g -O1 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F1xx/Include -I ../Drivers/CMSIS/Include -I ../Core/include-I.\RTE\_CANtoPWM-IE:\MyApp\Keil\Pack\ARM\CMSIS\6.2.0\CMSIS\Core\Include-IE:\MyApp\Keil\Pack\Keil\STM32F1xx_DFP\2.4.1\Device\Include-D__UVISION_VERSION="543" -DSTM32F10X_MD -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F103xB-o cantopwm\param_getset.o --omf_browse cantopwm\param_getset.crf --depend cantopwm\param_getset.d)
+I (../Core/include/uavcan\protocol\param\GetSet.h)(0x696BA3F6)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdint.h)(0x5E8E3CC2)
+I (../Core/Inc/canard.h)(0x69197D8C)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stddef.h)(0x5E8E3CC2)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdbool.h)(0x5E8E3CC2)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\assert.h)(0x5E8E3CC2)
+I (../Core/include/uavcan\protocol\param\NumericValue.h)(0x696BA3F6)
+I (../Core/include/uavcan\protocol\param\Empty.h)(0x696BA3F6)
+I (../Core/include/uavcan\protocol\param\Value.h)(0x696BA3F6)
+F (..\Core\include\uavcan\protocol\param\param_NumericValue.c)(0x67104F9E)(--c99 -c --cpu Cortex-M3 -D__EVAL -D__MICROLIB -g -O1 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F1xx/Include -I ../Drivers/CMSIS/Include -I ../Core/include-I.\RTE\_CANtoPWM-IE:\MyApp\Keil\Pack\ARM\CMSIS\6.2.0\CMSIS\Core\Include-IE:\MyApp\Keil\Pack\Keil\STM32F1xx_DFP\2.4.1\Device\Include-D__UVISION_VERSION="543" -DSTM32F10X_MD -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F103xB-o cantopwm\param_numericvalue.o --omf_browse cantopwm\param_numericvalue.crf --depend cantopwm\param_numericvalue.d)
+I (../Core/include/uavcan\protocol\param\NumericValue.h)(0x696BA3F6)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdint.h)(0x5E8E3CC2)
+I (../Core/Inc/canard.h)(0x69197D8C)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stddef.h)(0x5E8E3CC2)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdbool.h)(0x5E8E3CC2)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\assert.h)(0x5E8E3CC2)
+I (../Core/include/uavcan\protocol\param\Empty.h)(0x696BA3F6)
+F (..\Core\include\uavcan\protocol\param\param_Value.c)(0x67104F9E)(--c99 -c --cpu Cortex-M3 -D__EVAL -D__MICROLIB -g -O1 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F1xx/Include -I ../Drivers/CMSIS/Include -I ../Core/include-I.\RTE\_CANtoPWM-IE:\MyApp\Keil\Pack\ARM\CMSIS\6.2.0\CMSIS\Core\Include-IE:\MyApp\Keil\Pack\Keil\STM32F1xx_DFP\2.4.1\Device\Include-D__UVISION_VERSION="543" -DSTM32F10X_MD -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F103xB-o cantopwm\param_value.o --omf_browse cantopwm\param_value.crf --depend cantopwm\param_value.d)
+I (../Core/include/uavcan\protocol\param\Value.h)(0x696BA3F6)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdint.h)(0x5E8E3CC2)
+I (../Core/Inc/canard.h)(0x69197D8C)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stddef.h)(0x5E8E3CC2)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdbool.h)(0x5E8E3CC2)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\assert.h)(0x5E8E3CC2)
+I (../Core/include/uavcan\protocol\param\Empty.h)(0x696BA3F6)
+F (..\Core\include\uavcan\protocol\protocol_GetNodeInfo.c)(0x67104F9E)(--c99 -c --cpu Cortex-M3 -D__EVAL -D__MICROLIB -g -O1 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F1xx/Include -I ../Drivers/CMSIS/Include -I ../Core/include-I.\RTE\_CANtoPWM-IE:\MyApp\Keil\Pack\ARM\CMSIS\6.2.0\CMSIS\Core\Include-IE:\MyApp\Keil\Pack\Keil\STM32F1xx_DFP\2.4.1\Device\Include-D__UVISION_VERSION="543" -DSTM32F10X_MD -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F103xB-o cantopwm\protocol_getnodeinfo.o --omf_browse cantopwm\protocol_getnodeinfo.crf --depend cantopwm\protocol_getnodeinfo.d)
+I (../Core/include/uavcan\protocol\GetNodeInfo.h)(0x696C4C83)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdint.h)(0x5E8E3CC2)
+I (../Core/Inc/canard.h)(0x69197D8C)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stddef.h)(0x5E8E3CC2)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdbool.h)(0x5E8E3CC2)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\assert.h)(0x5E8E3CC2)
+I (../Core/include/uavcan\protocol\HardwareVersion.h)(0x696BA45E)
+I (../Core/include/uavcan\protocol\NodeStatus.h)(0x692BBD91)
+I (../Core/include/uavcan\protocol\SoftwareVersion.h)(0x696BA45E)
+F (..\Core\include\uavcan\protocol\protocol_HardwareVersion.c)(0x67104F9E)(--c99 -c --cpu Cortex-M3 -D__EVAL -D__MICROLIB -g -O1 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F1xx/Include -I ../Drivers/CMSIS/Include -I ../Core/include-I.\RTE\_CANtoPWM-IE:\MyApp\Keil\Pack\ARM\CMSIS\6.2.0\CMSIS\Core\Include-IE:\MyApp\Keil\Pack\Keil\STM32F1xx_DFP\2.4.1\Device\Include-D__UVISION_VERSION="543" -DSTM32F10X_MD -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F103xB-o cantopwm\protocol_hardwareversion.o --omf_browse cantopwm\protocol_hardwareversion.crf --depend cantopwm\protocol_hardwareversion.d)
+I (../Core/include/uavcan\protocol\HardwareVersion.h)(0x696BA45E)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdint.h)(0x5E8E3CC2)
+I (../Core/Inc/canard.h)(0x69197D8C)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stddef.h)(0x5E8E3CC2)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdbool.h)(0x5E8E3CC2)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\assert.h)(0x5E8E3CC2)
+F (..\Core\include\uavcan\protocol\protocol_SoftwareVersion.c)(0x67104F9E)(--c99 -c --cpu Cortex-M3 -D__EVAL -D__MICROLIB -g -O1 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F1xx/Include -I ../Drivers/CMSIS/Include -I ../Core/include-I.\RTE\_CANtoPWM-IE:\MyApp\Keil\Pack\ARM\CMSIS\6.2.0\CMSIS\Core\Include-IE:\MyApp\Keil\Pack\Keil\STM32F1xx_DFP\2.4.1\Device\Include-D__UVISION_VERSION="543" -DSTM32F10X_MD -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F103xB-o cantopwm\protocol_softwareversion.o --omf_browse cantopwm\protocol_softwareversion.crf --depend cantopwm\protocol_softwareversion.d)
+I (../Core/include/uavcan\protocol\SoftwareVersion.h)(0x696BA45E)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdint.h)(0x5E8E3CC2)
+I (../Core/Inc/canard.h)(0x69197D8C)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stddef.h)(0x5E8E3CC2)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdbool.h)(0x5E8E3CC2)
+I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\assert.h)(0x5E8E3CC2)
+F (..\Core\include\uavcan\equipment\esc\esc_RawCommand.c)(0x67104F9E)(--c99 -c --cpu Cortex-M3 -D__EVAL -D__MICROLIB -g -O1 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc -I ../Drivers/STM32F1xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F1xx/Include -I ../Drivers/CMSIS/Include -I ../Core/include-I.\RTE\_CANtoPWM-IE:\MyApp\Keil\Pack\ARM\CMSIS\6.2.0\CMSIS\Core\Include-IE:\MyApp\Keil\Pack\Keil\STM32F1xx_DFP\2.4.1\Device\Include-D__UVISION_VERSION="543" -DSTM32F10X_MD -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F103xB-o cantopwm\esc_rawcommand.o --omf_browse cantopwm\esc_rawcommand.crf --depend cantopwm\esc_rawcommand.d)
+I (../Core/include/uavcan\equipment\esc\RawCommand.h)(0x696C4CD0)
 I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stdint.h)(0x5E8E3CC2)
 I (../Core/Inc/canard.h)(0x69197D8C)
 I (E:\MyApp\Keil\Program\ARM\ArmCompiler506\include\stddef.h)(0x5E8E3CC2)
