@@ -48,7 +48,7 @@ bool shouldAcceptTransfer(const CanardInstance* ins,
                          uint8_t source_node_id);
 void onTransferReception(CanardInstance* ins, CanardRxTransfer* transfer);
 void processActuatorCommands(uavcan_equipment_actuator_ArrayCommand* cmd);
-void processEscRawCommand(uavcan_equipment_esc_RawCommand* raw);
+void processEscRawCommand(uavcan_equipment_esc_RawCommand* raw, uint8_t source_node_id);
 void processCanRxFrames(void);
 void processCanTxQueue(void);
 int16_t sendActuatorCommand(CanardInstance* ins, uint8_t actuator_id, float value);
@@ -282,7 +282,6 @@ static void start_dynamic_allocation(void) {
     dyn_allocation_active = true;
     dyn_last_req_ms = HAL_GetTick();
     int req_res = canardDynIDClientStart(&dynid_client, &canard_ins, 0);
-    printf("[DynID] First request res=%d txq=%p\r\n", req_res, canard_ins.tx_queue);
 }
 /* USER CODE END 0 */
 
@@ -411,11 +410,9 @@ int main(void)
             int req_res = canardDynIDClientStart(&dynid_client, &canard_ins, 0);
             dyn_last_req_ms = HAL_GetTick();
             dyn_followup_pending = false;
-            printf("[DynID] Follow-up req res=%d txq=%p offset=%u\r\n", req_res, canard_ins.tx_queue, (unsigned)dynid_client.uid_prefix_len);
         } else if (HAL_GetTick() - dyn_last_req_ms >= 1000 && dynid_client.uid_prefix_len < sizeof(node_unique_id)) {
             int req_res = canardDynIDClientStart(&dynid_client, &canard_ins, 0);
             dyn_last_req_ms = HAL_GetTick();
-            printf("[DynID] Periodic req res=%d txq=%p\r\n", req_res, canard_ins.tx_queue);
         }
     }
     
@@ -423,7 +420,6 @@ int main(void)
     static uint32_t last_node_status_time = 0;
     if (HAL_GetTick() - last_node_status_time >= 1000)
     {
-        printf("My Node ID: %d\r\n", canardGetLocalNodeID(&canard_ins));
         publishNodeStatus();
         last_node_status_time = HAL_GetTick();
     }
@@ -706,7 +702,6 @@ bool shouldAcceptTransfer(const CanardInstance* ins,
 
     // ESC RawCommand (Message ID=1030)
     if (data_type_id == UAVCAN_EQUIPMENT_ESC_RAWCOMMAND_ID) {
-        printf("Accept RawCommand ID=1030 Type=%d Src=%d\r\n", transfer_type, source_node_id);
         *out_data_type_signature = UAVCAN_EQUIPMENT_ESC_RAWCOMMAND_SIGNATURE;
         return true;
     }
@@ -732,10 +727,6 @@ bool shouldAcceptTransfer(const CanardInstance* ins,
         return true;
     }
     
-    // Debug: 打印被拒绝的包信息，有助于通过排除法
-    // if(data_type_id != 341) 
-    printf("Reject: ID=%d Type=%d Src=%d\r\n", data_type_id, transfer_type, source_node_id);
-
     return false;
 }
 
@@ -745,9 +736,6 @@ void onTransferReception(CanardInstance* ins, CanardRxTransfer* transfer) {
     if (transfer->data_type_id == UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID && 
         transfer->transfer_type == CanardTransferTypeBroadcast)
     {
-         printf("[DynID] RX alloc src=%u len=%lu\r\n",
-             transfer->source_node_id,
-             (unsigned long)transfer->payload_len);
         canardDynIDClientHandleAllocationResponse(&dynid_client, transfer);
 
         // If allocator echoed part of our UID but node_id is still 0, schedule quick follow-up chunk
@@ -791,12 +779,10 @@ void onTransferReception(CanardInstance* ins, CanardRxTransfer* transfer) {
         uavcan_equipment_esc_RawCommand raw;
         raw.cmd.data = raw_cmd_buf;
         uint8_t* dyn_buf = (uint8_t*)raw_cmd_buf;
-        printf("[ESC Raw] src=%d len=%d\r\n", transfer->source_node_id, transfer->payload_len);
         int32_t result = uavcan_equipment_esc_RawCommand_decode(transfer, transfer->payload_len, &raw, &dyn_buf);
 
         if (result >= 0) {
-            printf("[ESC Raw] decode ok, cmd_len=%d\r\n", raw.cmd.len);
-            processEscRawCommand(&raw);
+            processEscRawCommand(&raw, transfer->source_node_id);
         } else {
             printf("ESC RawCommand decode fail: %d\r\n", result);
         }
@@ -808,7 +794,6 @@ void onTransferReception(CanardInstance* ins, CanardRxTransfer* transfer) {
 
 // 处理执行器命令的实际函数
 void processActuatorCommands(uavcan_equipment_actuator_ArrayCommand* cmd) {
-    printf("Received ArrayCommand with %d commands:\r\n", cmd->commands.len);
     // 遍历所有接收到的命令
     for (uint8_t i = 0; i < cmd->commands.len; i++) {
         // 获取单个执行器命令
@@ -824,10 +809,6 @@ void processActuatorCommands(uavcan_equipment_actuator_ArrayCommand* cmd) {
 
         int32_t ch = get_mapped_channel(single_cmd->actuator_id);
         uint32_t ccr = pulse_us_to_ticks(pulse_us);
-        printf("  - Actuator ID: %d -> CH%ld, Value: %f, Pulse: %d us\r\n", 
-               single_cmd->actuator_id, (long)ch,
-               single_cmd->command_value, 
-               pulse_us);
 
         if (ch < 0 || ch > 3) {
             continue; // 映射为关闭或越界则忽略
@@ -876,8 +857,8 @@ static uint32_t pulse_us_to_ticks(uint16_t pulse_us) {
 }
 
 // 处理 ESC RawCommand：将 int14[-8192,8191] 归一化到 -1..1 再映射 PWM
-void processEscRawCommand(uavcan_equipment_esc_RawCommand* raw) {
-    printf("Received ESC RawCommand with %d entries:\r\n", raw->cmd.len);
+void processEscRawCommand(uavcan_equipment_esc_RawCommand* raw, uint8_t source_node_id) {
+    printf("[ESC] src=%u len=%d\r\n", (unsigned)source_node_id, raw->cmd.len);
 
     for (uint8_t i = 0; i < raw->cmd.len && i < 4; i++) {
         int16_t rc = raw->cmd.data[i];
@@ -892,7 +873,7 @@ void processEscRawCommand(uavcan_equipment_esc_RawCommand* raw) {
 
         int32_t ch = get_mapped_channel(i);
         uint32_t ccr = pulse_us_to_ticks(pulse);
-        printf("  - ESC[%d]=>CH%ld rc=%d norm=%.3f pulse=%u us (ccr=%lu)\r\n", i, (long)ch, rc, norm, pulse, (unsigned long)ccr);
+        printf("  ESC[%d] rc=%d norm=%.3f pulse=%u us ch=%ld\r\n", i, rc, norm, pulse, (long)ch);
 
         if (ch < 0 || ch > 3) {
             continue; // 超出映射范围则忽略
@@ -930,20 +911,6 @@ void processCanTxQueue(void) {
             .DLC = tx_frame->data_len
         };
 
-        uint16_t tx_dtype = (uint16_t)((tx_frame->id >> 8) & 0xFFFFU);
-        uint8_t tx_src = (uint8_t)(tx_frame->id & 0x7FU);
-        printf("[CAN TX] id=0x%08lX dlc=%d dtype=%u src=%u\r\n",
-               (unsigned long)tx_frame->id,
-               tx_frame->data_len,
-               (unsigned)tx_dtype,
-               (unsigned)tx_src);
-        if (tx_dtype == UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID) {
-            printf("[DynID] TX frame dtype=1 dlc=%d src=%u tid_hint=%u\r\n",
-                   tx_frame->data_len,
-                   (unsigned)tx_src,
-                   (unsigned)(tx_frame->data_len ? tx_frame->data[tx_frame->data_len - 1] & 0x1FU : 0U));
-        }
-        
         uint32_t mailbox;
 
         // 等待有空闲邮箱；若短暂等待后仍满，微延时让仲裁/邮箱释放，再尝试几次
@@ -1064,38 +1031,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
         uint64_t timestamp_us = HAL_GetTick() * 1000;
         int16_t cr = canardHandleRxFrame(&canard_ins, &rx_frame, timestamp_us);
         if (cr >= 0) {
-            uint16_t dtype = (uint16_t)((rx_header.ExtId >> 8) & 0xFFFFU);
-            uint8_t src = (uint8_t)(rx_header.ExtId & 0x7FU);
-            printf("[CAN RX] id=0x%08lX dlc=%d dtype=%u src=%u cr=%d\r\n",
-                   (unsigned long)rx_header.ExtId,
-                   rx_header.DLC,
-                   (unsigned)dtype,
-                   (unsigned)src,
-                   (int)cr);
-            if (dtype == UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID) {
-                printf("[DynID] RX frame dtype=1 src=%u dlc=%d cr=%d\r\n", (unsigned)src, rx_header.DLC, cr);
-            }
-        }
-        if (cr < 0 && cr != -CANARD_ERROR_RX_NOT_WANTED) {
-            uint8_t tail = rx_data[rx_header.DLC ? (rx_header.DLC - 1) : 0];
-            uint8_t start = (tail >> 7) & 1;
-            uint8_t end   = (tail >> 6) & 1;
-            uint8_t tog   = (tail >> 5) & 1;
-            uint8_t tid   = tail & 0x1F;
-            uint8_t src   = (uint8_t)(rx_header.ExtId & 0x7F);
-            uint16_t dtype = (uint16_t)((rx_header.ExtId >> 8) & 0xFFFF);
-            printf("canardHandleRxFrame err=%d id=0x%08lX dlc=%d src=%d dtype=%u tail=%02X s=%d e=%d t=%d tid=%d bytes:%02X %02X %02X %02X %02X %02X %02X %02X\r\n",
-                   cr,
-                   (unsigned long)rx_header.ExtId,
-                   rx_header.DLC,
-                   src,
-                   dtype,
-                   tail,
-                   start,
-                   end,
-                   tog,
-                   tid,
-                   rx_data[0], rx_data[1], rx_data[2], rx_data[3], rx_data[4], rx_data[5], rx_data[6], rx_data[7]);
+            (void)cr;
         }
     }
 }
