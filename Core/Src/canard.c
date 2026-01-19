@@ -189,7 +189,9 @@ int16_t canardBroadcastObj(CanardInstance* ins, CanardTxTransfer* transfer_objec
 
     if (canardGetLocalNodeID(ins) == 0)
     {
-        if (transfer_object->payload_len > 7)
+        // Allow anonymous multi-frame for dynamic allocation (dtid==1) even if payload_len>7.
+        // For other types, keep the 7-byte limit per UAVCAN v0 anonymous rules.
+        if ((transfer_object->data_type_id != 1U) && (transfer_object->payload_len > 7))
         {
             return -CANARD_ERROR_NODE_ID_NOT_SET;
         }
@@ -205,6 +207,13 @@ int16_t canardBroadcastObj(CanardInstance* ins, CanardTxTransfer* transfer_objec
         const uint16_t discriminator = (uint16_t)((crcAdd(0xFFFFU, transfer_object->payload, transfer_object->payload_len)) & 0x7FFEU);
         can_id = ((uint32_t) transfer_object->priority << 24U) | ((uint32_t) discriminator << 9U) |
                  ((uint32_t) (transfer_object->data_type_id & DTIDMask) << 8U) | (uint32_t) canardGetLocalNodeID(ins);
+
+        // For dynamic allocation (dtid==1) multi-frame requests, CRC must be computed even in anonymous mode
+        // so the allocator can validate the transfer. Single-frame anonymous messages keep CRC at 0xFFFF per spec.
+        if ((transfer_object->data_type_id == 1U) && (transfer_object->payload_len > 7U))
+        {
+            crc = calculateCRC(transfer_object);
+        }
     }
     else
     {

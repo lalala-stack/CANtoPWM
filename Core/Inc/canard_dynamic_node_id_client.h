@@ -44,6 +44,7 @@ typedef struct
     uint8_t unique_id[UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_UNIQUE_ID_MAX_LENGTH];
     uint8_t node_id;
     uint8_t transfer_id;
+    uint8_t uid_prefix_len; // progressive prefix length: 6, 12, 16
 } CanardDynIDClient;
 
 /**

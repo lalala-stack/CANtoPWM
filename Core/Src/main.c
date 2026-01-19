@@ -97,7 +97,7 @@ typedef struct {
 
 #define PARAM_COUNT 5
 static ParamEntry params[PARAM_COUNT] = {
-    {"can_node_id", 60.0f, 1.0f, 127.0f, 60.0f, true},
+    {"can_node_id", 60.0f, 0.0f, 127.0f, 60.0f, true},
     {"ch0_map", 0.0f, -1.0f, 3.0f, 0.0f, true},
     {"ch1_map", 1.0f, -1.0f, 3.0f, 1.0f, true},
     {"ch2_map", 2.0f, -1.0f, 3.0f, 2.0f, true},
@@ -105,6 +105,10 @@ static ParamEntry params[PARAM_COUNT] = {
 };
 static int8_t pending_node_id = -1; // defer ID change until outside ISR to avoid fragment drop
 static float tim2_ticks_per_us = 1.0f; // updated at init to scale 1-2ms to CCR
+static bool dyn_allocation_active = false;
+static uint32_t dyn_last_req_ms = 0;
+static bool dyn_followup_pending = false; // schedule immediate follow-up chunk after allocator echo
+static uint32_t dyn_followup_deadline_ms = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -114,6 +118,7 @@ void read_unique_id(uint8_t* out_uid);
 static int32_t get_mapped_channel(uint8_t logical_index);
 static void update_tim2_tick_scale(void);
 static uint32_t pulse_us_to_ticks(uint16_t pulse_us);
+static void start_dynamic_allocation(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -270,6 +275,15 @@ void run_parsing_test(void) {
         printf("Skipping Motor Test (No ID assigned)\r\n");
     }
 }
+
+static void start_dynamic_allocation(void) {
+    canardForgetLocalNodeID(&canard_ins); // set to anonymous/broadcast (0)
+    canardDynIDClientInit(&dynid_client, node_unique_id);
+    dyn_allocation_active = true;
+    dyn_last_req_ms = HAL_GetTick();
+    int req_res = canardDynIDClientStart(&dynid_client, &canard_ins, 0);
+    printf("[DynID] First request res=%d txq=%p\r\n", req_res, canard_ins.tx_queue);
+}
 /* USER CODE END 0 */
 
 /**
@@ -319,7 +333,7 @@ int main(void)
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
 
     // 根据当前 PCLK1/预分频计算 TIM2 每微秒的计数，确保无论周期如何调整都能输出 1-2ms 脉宽
-    update_tim2_tick_scale();
+	update_tim2_tick_scale();
 
   // 初始化libcanard
 	canardInit(&canard_ins,
@@ -329,8 +343,13 @@ int main(void)
 						shouldAcceptTransfer,
           NULL);
 
-  // 固定节点ID为 60
-  canardSetLocalNodeID(&canard_ins, 60);
+    canardDynIDClientInit(&dynid_client, node_unique_id);
+      uint8_t initial_node_id = (uint8_t)(params[0].value + 0.5f);
+      if (initial_node_id == 0) {
+          start_dynamic_allocation();
+      } else {
+          canardSetLocalNodeID(&canard_ins, initial_node_id);
+      }
 
 	// 初始化CAN过滤器
 	CAN_FilterTypeDef filter;
@@ -364,14 +383,40 @@ int main(void)
   while (1)
   {
     // 固定ID模式：直接处理发送队列
-      processCanTxQueue();
+		processCanTxQueue();
 
     // 如果有待应用的节点ID，移到主循环中执行，避免在服务传输过程中切换导致分片被拒绝
-    if (pending_node_id >= CANARD_MIN_NODE_ID && pending_node_id <= CANARD_MAX_NODE_ID) {
+    if (pending_node_id >= 0 && pending_node_id <= CANARD_MAX_NODE_ID) {
         uint8_t new_id = (uint8_t)pending_node_id;
-        canardSetLocalNodeID(&canard_ins, new_id);
+        if (new_id == 0) {
+            start_dynamic_allocation();
+        } else {
+            dyn_allocation_active = false;
+            canardSetLocalNodeID(&canard_ins, new_id);
+        }
+        params[0].value = (float)new_id;
         pending_node_id = -1;
         printf("[Param] Applied Node ID = %d\r\n", new_id);
+    }
+
+    if (dyn_allocation_active) {
+        uint8_t allocated = canardDynIDClientGetNodeID(&dynid_client);
+        if (allocated != 0 && allocated <= CANARD_MAX_NODE_ID) {
+            canardSetLocalNodeID(&canard_ins, allocated);
+            dyn_allocation_active = false;
+            params[0].value = (float)allocated;
+            printf("[DynID] Allocated Node ID = %d\r\n", allocated);
+            dyn_followup_pending = false;
+        } else if (dyn_followup_pending && HAL_GetTick() >= dyn_followup_deadline_ms && dynid_client.uid_prefix_len < sizeof(node_unique_id)) {
+            int req_res = canardDynIDClientStart(&dynid_client, &canard_ins, 0);
+            dyn_last_req_ms = HAL_GetTick();
+            dyn_followup_pending = false;
+            printf("[DynID] Follow-up req res=%d txq=%p offset=%u\r\n", req_res, canard_ins.tx_queue, (unsigned)dynid_client.uid_prefix_len);
+        } else if (HAL_GetTick() - dyn_last_req_ms >= 1000 && dynid_client.uid_prefix_len < sizeof(node_unique_id)) {
+            int req_res = canardDynIDClientStart(&dynid_client, &canard_ins, 0);
+            dyn_last_req_ms = HAL_GetTick();
+            printf("[DynID] Periodic req res=%d txq=%p\r\n", req_res, canard_ins.tx_queue);
+        }
     }
     
     // 发送心跳包 (1Hz)
@@ -560,7 +605,7 @@ void handleParamGetSet(CanardInstance* ins, CanardRxTransfer* transfer) {
          // 如果修改了 can_node_id，标记为待应用，避免在当前传输中途切换 ID 导致后续分片被拒绝
          if (strcmp(found->name, "can_node_id") == 0) {
              uint8_t new_id = (uint8_t)found->value;
-             if (new_id >= CANARD_MIN_NODE_ID && new_id <= CANARD_MAX_NODE_ID) {
+             if (new_id == 0 || (new_id >= CANARD_MIN_NODE_ID && new_id <= CANARD_MAX_NODE_ID)) {
                  pending_node_id = (int8_t)new_id;
                  printf("[Param] Pending Node ID = %d (will apply after handler)\r\n", new_id);
              } else {
@@ -700,7 +745,18 @@ void onTransferReception(CanardInstance* ins, CanardRxTransfer* transfer) {
     if (transfer->data_type_id == UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID && 
         transfer->transfer_type == CanardTransferTypeBroadcast)
     {
+         printf("[DynID] RX alloc src=%u len=%lu\r\n",
+             transfer->source_node_id,
+             (unsigned long)transfer->payload_len);
         canardDynIDClientHandleAllocationResponse(&dynid_client, transfer);
+
+        // If allocator echoed part of our UID but node_id is still 0, schedule quick follow-up chunk
+        if (dyn_allocation_active && canardDynIDClientGetNodeID(&dynid_client) == 0 && dynid_client.uid_prefix_len < sizeof(node_unique_id)) {
+            dyn_followup_pending = true;
+            dyn_followup_deadline_ms = HAL_GetTick() + 10; // 10ms follow-up per spec window (<=400ms)
+        } else {
+            dyn_followup_pending = false;
+        }
     }
     // GetNodeInfo Request (Service ID=1, Request)
     else if (transfer->data_type_id == UAVCAN_PROTOCOL_GETNODEINFO_ID &&
@@ -863,9 +919,6 @@ void processEscRawCommand(uavcan_equipment_esc_RawCommand* raw) {
 
 // 处理发送队列
 void processCanTxQueue(void) {
-    // 强制打印，确保函数进来了 (调试完成后请删除)
-    // static uint32_t loop_cnt = 0;
-    // if(loop_cnt++ % 1000 == 0) printf("ProcTX Q: %p\r\n", canard_ins.tx_queue);
 
     const CanardCANFrame* tx_frame = canardPeekTxQueue(&canard_ins);
     
@@ -876,6 +929,20 @@ void processCanTxQueue(void) {
             .RTR = CAN_RTR_DATA,
             .DLC = tx_frame->data_len
         };
+
+        uint16_t tx_dtype = (uint16_t)((tx_frame->id >> 8) & 0xFFFFU);
+        uint8_t tx_src = (uint8_t)(tx_frame->id & 0x7FU);
+        printf("[CAN TX] id=0x%08lX dlc=%d dtype=%u src=%u\r\n",
+               (unsigned long)tx_frame->id,
+               tx_frame->data_len,
+               (unsigned)tx_dtype,
+               (unsigned)tx_src);
+        if (tx_dtype == UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID) {
+            printf("[DynID] TX frame dtype=1 dlc=%d src=%u tid_hint=%u\r\n",
+                   tx_frame->data_len,
+                   (unsigned)tx_src,
+                   (unsigned)(tx_frame->data_len ? tx_frame->data[tx_frame->data_len - 1] & 0x1FU : 0U));
+        }
         
         uint32_t mailbox;
 
@@ -903,6 +970,9 @@ void processCanTxQueue(void) {
         }
         
         tx_frame = canardPeekTxQueue(&canard_ins);
+        if (tx_frame == NULL) {
+            printf("[DynID] TX queue empty\r\n");
+        }
     }
 }
 
@@ -993,6 +1063,19 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
         
         uint64_t timestamp_us = HAL_GetTick() * 1000;
         int16_t cr = canardHandleRxFrame(&canard_ins, &rx_frame, timestamp_us);
+        if (cr >= 0) {
+            uint16_t dtype = (uint16_t)((rx_header.ExtId >> 8) & 0xFFFFU);
+            uint8_t src = (uint8_t)(rx_header.ExtId & 0x7FU);
+            printf("[CAN RX] id=0x%08lX dlc=%d dtype=%u src=%u cr=%d\r\n",
+                   (unsigned long)rx_header.ExtId,
+                   rx_header.DLC,
+                   (unsigned)dtype,
+                   (unsigned)src,
+                   (int)cr);
+            if (dtype == UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID) {
+                printf("[DynID] RX frame dtype=1 src=%u dlc=%d cr=%d\r\n", (unsigned)src, rx_header.DLC, cr);
+            }
+        }
         if (cr < 0 && cr != -CANARD_ERROR_RX_NOT_WANTED) {
             uint8_t tail = rx_data[rx_header.DLC ? (rx_header.DLC - 1) : 0];
             uint8_t start = (tail >> 7) & 1;

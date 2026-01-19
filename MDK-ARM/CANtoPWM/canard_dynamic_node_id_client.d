@@ -7,3 +7,4 @@ cantopwm\canard_dynamic_node_id_client.o: E:\MyApp\Keil\Program\ARM\ArmCompiler5
 cantopwm\canard_dynamic_node_id_client.o: E:\MyApp\Keil\Program\ARM\ArmCompiler506\Bin\..\include\assert.h
 cantopwm\canard_dynamic_node_id_client.o: ../Core/include/uavcan/protocol/dynamic_node_id/Allocation.h
 cantopwm\canard_dynamic_node_id_client.o: E:\MyApp\Keil\Program\ARM\ArmCompiler506\Bin\..\include\string.h
+cantopwm\canard_dynamic_node_id_client.o: E:\MyApp\Keil\Program\ARM\ArmCompiler506\Bin\..\include\stdio.h
