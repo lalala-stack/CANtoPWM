@@ -157,10 +157,7 @@ void inject_rx_frame_from_server(CanardInstance* server_ins, uint64_t timestamp_
     }
 }
 
-// --- 动态ID分配测试函数 (修复版) ---
-void run_dynamic_id_test(void) {
-    // Stub placeholder for lab testing; left empty in production build.
-}
+
 
 int main(void)
 {
