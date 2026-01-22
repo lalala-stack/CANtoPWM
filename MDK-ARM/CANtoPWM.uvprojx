@@ -555,6 +555,26 @@
               <FileType>1</FileType>
               <FilePath>../Core/Src/stm32f1xx_hal_msp.c</FilePath>
             </File>
+            <File>
+              <FileName>protocol_RestartNode.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\include\uavcan\protocol\protocol_RestartNode.c</FilePath>
+            </File>
+            <File>
+              <FileName>protocol_GetTransportStats.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\include\uavcan\protocol\protocol_GetTransportStats.c</FilePath>
+            </File>
+            <File>
+              <FileName>protocol_CANIfaceStats.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\include\uavcan\protocol\protocol_CANIfaceStats.c</FilePath>
+            </File>
+            <File>
+              <FileName>param_ExecuteOpcode.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\include\uavcan\protocol\param\param_ExecuteOpcode.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

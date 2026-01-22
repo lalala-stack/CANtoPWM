@@ -34,6 +34,10 @@
 #include "uavcan/protocol/NodeStatus.h"
 #include "uavcan/protocol/GetNodeInfo.h"
 #include "uavcan/protocol/param/GetSet.h"
+#include "uavcan/protocol/param/ExecuteOpcode.h"
+#include "uavcan/protocol/RestartNode.h"
+#include "uavcan/protocol/GetTransportStats.h"
+#include "stm32f1xx_hal_flash_ex.h"
 #include <stdio.h>
 #include "canard_dynamic_node_id_client.h"
 /* USER CODE END Includes */
@@ -56,6 +60,9 @@ int16_t sendNodeStatusRequest(CanardInstance* ins, uint8_t target_node_id);
 void publishNodeStatus(void);
 void handleGetNodeInfo(CanardInstance* ins, CanardRxTransfer* transfer);
 void handleParamGetSet(CanardInstance* ins, CanardRxTransfer* transfer);
+void handleParamExecuteOpcode(CanardInstance* ins, CanardRxTransfer* transfer);
+void handleRestartNode(CanardInstance* ins, CanardRxTransfer* transfer);
+void handleGetTransportStats(CanardInstance* ins, CanardRxTransfer* transfer);
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -109,6 +116,24 @@ static bool dyn_allocation_active = false;
 static uint32_t dyn_last_req_ms = 0;
 static bool dyn_followup_pending = false; // schedule immediate follow-up chunk after allocator echo
 static uint32_t dyn_followup_deadline_ms = 0;
+static bool restart_pending = false; // schedule reset in main loop (not in ISR)
+static uint32_t restart_request_time_ms = 0;
+static uint64_t stats_transfers_tx = 0;
+static uint64_t stats_transfers_rx = 0;
+static uint64_t stats_transfer_errors = 0;
+static uint64_t stats_frames_tx = 0;
+static uint64_t stats_frames_rx = 0;
+static uint64_t stats_can_errors = 0;
+
+#define PARAM_STORE_MAGIC   0x50415241u // 'PARA'
+#define PARAM_STORE_VERSION 1u
+#define PARAM_STORE_ADDR    0x0800FC00u // adjust if Flash size >64K; use last page on 64K parts
+typedef struct {
+    uint32_t magic;
+    uint32_t version;
+    float values[PARAM_COUNT];
+    uint32_t crc;
+} ParamStoreImage;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -119,6 +144,9 @@ static int32_t get_mapped_channel(uint8_t logical_index);
 static void update_tim2_tick_scale(void);
 static uint32_t pulse_us_to_ticks(uint16_t pulse_us);
 static void start_dynamic_allocation(void);
+static void load_params_from_flash(void);
+static bool save_params_to_flash(void);
+static uint32_t param_crc32(const void* data, size_t len);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -161,6 +189,73 @@ void read_unique_id(uint8_t* out_uid)
     // The unique ID for allocation is 16 bytes, we pad the 12-byte MCU ID with zeros
     memset(out_uid, 0, 16);
     memcpy(out_uid, uid_buf, 12);
+}
+
+// --- 参数持久化：CRC32（小型软件版） ---
+static uint32_t param_crc32(const void* data, size_t len)
+{
+    const uint8_t* p = (const uint8_t*)data;
+    uint32_t crc = 0xFFFFFFFFu;
+    while (len--) {
+        crc ^= *p++;
+        for (uint8_t i = 0; i < 8; i++) {
+            crc = (crc >> 1) ^ (0xEDB88320u & (-(int32_t)(crc & 1u)));
+        }
+    }
+    return crc ^ 0xFFFFFFFFu;
+}
+
+static bool save_params_to_flash(void)
+{
+    ParamStoreImage img;
+    img.magic = PARAM_STORE_MAGIC;
+    img.version = PARAM_STORE_VERSION;
+    for (int i = 0; i < PARAM_COUNT; i++) {
+        img.values[i] = params[i].value;
+    }
+    img.crc = param_crc32(&img, sizeof(img) - sizeof(img.crc));
+
+    HAL_FLASH_Unlock();
+
+    FLASH_EraseInitTypeDef erase = {0};
+    erase.TypeErase = FLASH_TYPEERASE_PAGES;
+    erase.PageAddress = PARAM_STORE_ADDR;
+    erase.NbPages = 1;
+    uint32_t page_error = 0;
+    if (HAL_FLASHEx_Erase(&erase, &page_error) != HAL_OK) {
+        HAL_FLASH_Lock();
+        printf("[Param] Flash erase failed err=0x%lX\r\n", (unsigned long)page_error);
+        return false;
+    }
+
+    uint32_t* src = (uint32_t*)&img;
+    size_t words = sizeof(img) / sizeof(uint32_t);
+    for (size_t i = 0; i < words; i++) {
+        if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, PARAM_STORE_ADDR + i * 4u, src[i]) != HAL_OK) {
+            HAL_FLASH_Lock();
+            printf("[Param] Flash program failed idx=%lu\r\n", (unsigned long)i);
+            return false;
+        }
+    }
+
+    HAL_FLASH_Lock();
+    return true;
+}
+
+static void load_params_from_flash(void)
+{
+    const ParamStoreImage* img = (const ParamStoreImage*)PARAM_STORE_ADDR;
+    if (img->magic != PARAM_STORE_MAGIC || img->version != PARAM_STORE_VERSION) {
+        return; // keep defaults
+    }
+    uint32_t crc = param_crc32(img, sizeof(*img) - sizeof(img->crc));
+    if (crc != img->crc) {
+        printf("[Param] CRC mismatch, ignore stored values\r\n");
+        return;
+    }
+    for (int i = 0; i < PARAM_COUNT; i++) {
+        params[i].value = img->values[i];
+    }
 }
 
 // --- 辅助工具：虚拟服务器实例 ---
@@ -325,6 +420,9 @@ int main(void)
 	for(int i=0; i<16; i++) printf("%02X ", node_unique_id[i]);
 	printf("\r\n");
 
+  // 加载已保存的参数（若校验通过），否则保持默认值
+  load_params_from_flash();
+
   // 启动TIM2的4个PWM通道
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
@@ -427,6 +525,15 @@ int main(void)
     // 清理过期的传输
     uint64_t timestamp = HAL_GetTick() * 1000; // 转换为微秒
     canardCleanupStaleTransfers(&canard_ins, timestamp);
+
+    // 如收到 RestartNode 请求，等回复排队后再复位，避免截断响应
+    if (restart_pending) {
+        bool tx_empty = (canardPeekTxQueue(&canard_ins) == NULL);
+        bool waited = (HAL_GetTick() - restart_request_time_ms) > 200;
+        if (tx_empty || waited) {
+            NVIC_SystemReset();
+        }
+    }
     
     HAL_Delay(1); // 短暂延迟
     /* USER CODE END WHILE */
@@ -529,6 +636,79 @@ void handleGetNodeInfo(CanardInstance* ins, CanardRxTransfer* transfer) {
     } else {
         // Debug: response enqueued, wait for processCanTxQueue to flush
         printf("[GetNodeInfo] Reply Enqueued, len=%lu\r\n", (unsigned long)len);
+    }
+}
+
+// 处理 RestartNode 请求：验证 magic，回复 ok，再在主循环中安排复位
+void handleRestartNode(CanardInstance* ins, CanardRxTransfer* transfer) {
+    static uavcan_protocol_RestartNodeRequest req;
+    uint8_t* dyn_buf = NULL;
+    memset(&req, 0, sizeof(req));
+
+    int32_t dec = uavcan_protocol_RestartNodeRequest_decode(transfer, transfer->payload_len, &req, &dyn_buf);
+    bool ok = (dec >= 0) && (req.magic_number == UAVCAN_PROTOCOL_RESTARTNODE_REQUEST_MAGIC_NUMBER);
+
+    uavcan_protocol_RestartNodeResponse resp;
+    resp.ok = ok;
+
+    static uint8_t buffer[UAVCAN_PROTOCOL_RESTARTNODE_RESPONSE_MAX_SIZE];
+    uint32_t len = uavcan_protocol_RestartNodeResponse_encode(&resp, buffer);
+
+    int16_t res = canardRequestOrRespond(ins,
+                           transfer->source_node_id,
+                           UAVCAN_PROTOCOL_RESTARTNODE_SIGNATURE,
+                           UAVCAN_PROTOCOL_RESTARTNODE_ID,
+                           &transfer->transfer_id,
+                           transfer->priority,
+                           CanardResponse,
+                           buffer,
+                           len);
+
+    if (res <= 0) {
+        printf("[RestartNode] Reply Failed: %d\r\n", res);
+        return;
+    }
+
+    if (ok) {
+        restart_pending = true;
+        restart_request_time_ms = HAL_GetTick();
+        printf("[RestartNode] Accepted, scheduling reset\r\n");
+    } else {
+        printf("[RestartNode] Reject magic=0x%llX\r\n", (unsigned long long)req.magic_number);
+    }
+}
+
+// 处理 GetTransportStats 请求：返回当前收发/错误计数和 CAN 接口统计
+void handleGetTransportStats(CanardInstance* ins, CanardRxTransfer* transfer) {
+    uavcan_protocol_GetTransportStatsResponse resp;
+    memset(&resp, 0, sizeof(resp));
+
+    resp.transfers_tx = stats_transfers_tx;
+    resp.transfers_rx = stats_transfers_rx;
+    resp.transfer_errors = stats_transfer_errors;
+
+    static uavcan_protocol_CANIfaceStats iface_stats[UAVCAN_PROTOCOL_GETTRANSPORTSTATS_RESPONSE_CAN_IFACE_STATS_MAX_LENGTH];
+    resp.can_iface_stats.len = 1; // 单 CAN 接口
+    resp.can_iface_stats.data = iface_stats;
+    iface_stats[0].frames_tx = stats_frames_tx;
+    iface_stats[0].frames_rx = stats_frames_rx;
+    iface_stats[0].errors   = stats_can_errors;
+
+    static uint8_t buffer[UAVCAN_PROTOCOL_GETTRANSPORTSTATS_RESPONSE_MAX_SIZE];
+    uint32_t len = uavcan_protocol_GetTransportStatsResponse_encode(&resp, buffer);
+
+    int16_t res = canardRequestOrRespond(ins,
+                           transfer->source_node_id,
+                           UAVCAN_PROTOCOL_GETTRANSPORTSTATS_SIGNATURE,
+                           UAVCAN_PROTOCOL_GETTRANSPORTSTATS_ID,
+                           &transfer->transfer_id,
+                           transfer->priority,
+                           CanardResponse,
+                           buffer,
+                           len);
+
+    if (res <= 0) {
+        printf("[GetTransportStats] Reply Failed: %d\r\n", res);
     }
 }
 
@@ -662,6 +842,46 @@ void handleParamGetSet(CanardInstance* ins, CanardRxTransfer* transfer) {
      }
 }
 
+// 处理 Param.ExecuteOpcode 请求（SAVE/ERASE）
+void handleParamExecuteOpcode(CanardInstance* ins, CanardRxTransfer* transfer) {
+    static uavcan_protocol_param_ExecuteOpcodeRequest req;
+    uint8_t* dyn_buf = NULL;
+    memset(&req, 0, sizeof(req));
+
+    bool ok = false;
+    if (uavcan_protocol_param_ExecuteOpcodeRequest_decode(transfer, transfer->payload_len, &req, &dyn_buf) >= 0) {
+        if (req.opcode == UAVCAN_PROTOCOL_PARAM_EXECUTEOPCODE_REQUEST_OPCODE_SAVE) {
+            ok = save_params_to_flash();
+            printf("[Param] SAVE opcode result=%d\r\n", ok);
+        } else if (req.opcode == UAVCAN_PROTOCOL_PARAM_EXECUTEOPCODE_REQUEST_OPCODE_ERASE) {
+            for (int i = 0; i < PARAM_COUNT; i++) {
+                params[i].value = params[i].def;
+            }
+            pending_node_id = (int8_t)params[0].value;
+            ok = save_params_to_flash();
+            printf("[Param] ERASE opcode result=%d\r\n", ok);
+        }
+    }
+
+    uavcan_protocol_param_ExecuteOpcodeResponse resp;
+    resp.ok = ok;
+    static uint8_t buffer[UAVCAN_PROTOCOL_PARAM_EXECUTEOPCODE_RESPONSE_MAX_SIZE];
+    uint32_t len = uavcan_protocol_param_ExecuteOpcodeResponse_encode(&resp, buffer);
+
+    int16_t res = canardRequestOrRespond(ins,
+                           transfer->source_node_id,
+                           UAVCAN_PROTOCOL_PARAM_EXECUTEOPCODE_SIGNATURE,
+                           UAVCAN_PROTOCOL_PARAM_EXECUTEOPCODE_ID,
+                           &transfer->transfer_id,
+                           transfer->priority,
+                           CanardResponse,
+                           buffer,
+                           len);
+    if (res <= 0) {
+        printf("[Param] ExecuteOpcode reply failed: %d\r\n", res);
+    }
+}
+
 // 决定是否接受某个传输的回调函数
 bool shouldAcceptTransfer(const CanardInstance* ins,
                          uint64_t* out_data_type_signature,
@@ -705,6 +925,18 @@ bool shouldAcceptTransfer(const CanardInstance* ins,
         *out_data_type_signature = UAVCAN_EQUIPMENT_ESC_RAWCOMMAND_SIGNATURE;
         return true;
     }
+
+    // GetTransportStats Request (Service ID=4)
+    if (data_type_id == UAVCAN_PROTOCOL_GETTRANSPORTSTATS_ID && transfer_type == CanardTransferTypeRequest) {
+        *out_data_type_signature = UAVCAN_PROTOCOL_GETTRANSPORTSTATS_SIGNATURE;
+        return true;
+    }
+
+    // RestartNode Request (Service ID=5)
+    if (data_type_id == UAVCAN_PROTOCOL_RESTARTNODE_ID && transfer_type == CanardTransferTypeRequest) {
+        *out_data_type_signature = UAVCAN_PROTOCOL_RESTARTNODE_SIGNATURE;
+        return true;
+    }
     
     // GetNodeInfo Request (Service ID=1)
     if (data_type_id == UAVCAN_PROTOCOL_GETNODEINFO_ID && transfer_type == CanardTransferTypeRequest) {
@@ -724,6 +956,12 @@ bool shouldAcceptTransfer(const CanardInstance* ins,
     if (data_type_id == UAVCAN_PROTOCOL_PARAM_GETSET_ID) {
         // printf("Accept Param Req\r\n"); // Debug
         *out_data_type_signature = UAVCAN_PROTOCOL_PARAM_GETSET_SIGNATURE;
+        return true;
+    }
+
+    // Param ExecuteOpcode
+    if (data_type_id == UAVCAN_PROTOCOL_PARAM_EXECUTEOPCODE_ID && transfer_type == CanardTransferTypeRequest) {
+        *out_data_type_signature = UAVCAN_PROTOCOL_PARAM_EXECUTEOPCODE_SIGNATURE;
         return true;
     }
     
@@ -754,6 +992,21 @@ void onTransferReception(CanardInstance* ins, CanardRxTransfer* transfer) {
     // Param GetSet Request
     else if (transfer->data_type_id == UAVCAN_PROTOCOL_PARAM_GETSET_ID) {
         handleParamGetSet(ins, transfer);
+    }
+    // Param ExecuteOpcode Request
+    else if (transfer->data_type_id == UAVCAN_PROTOCOL_PARAM_EXECUTEOPCODE_ID &&
+             transfer->transfer_type == CanardTransferTypeRequest) {
+        handleParamExecuteOpcode(ins, transfer);
+    }
+    // GetTransportStats Request (Service ID=4, Request)
+    else if (transfer->data_type_id == UAVCAN_PROTOCOL_GETTRANSPORTSTATS_ID &&
+             transfer->transfer_type == CanardTransferTypeRequest) {
+        handleGetTransportStats(ins, transfer);
+    }
+    // RestartNode Request (Service ID=5, Request)
+    else if (transfer->data_type_id == UAVCAN_PROTOCOL_RESTARTNODE_ID &&
+             transfer->transfer_type == CanardTransferTypeRequest) {
+        handleRestartNode(ins, transfer);
     }
     // 检查数据类型
     else if (transfer->data_type_id == UAVCAN_EQUIPMENT_ACTUATOR_ARRAYCOMMAND_ID) {
@@ -927,11 +1180,15 @@ void processCanTxQueue(void) {
         if (HAL_CAN_AddTxMessage(&hcan, &tx_header, tx_frame->data, &mailbox) == HAL_OK) {
             // 成功发送，从队列移除
             canardPopTxQueue(&canard_ins);
+            stats_frames_tx++;
+            stats_transfers_tx++;
         } else {
             // 发送失败，打印错误原因
             uint32_t err = HAL_CAN_GetError(&hcan);
             uint32_t free_level = HAL_CAN_GetTxMailboxesFreeLevel(&hcan);
             printf("CAN Tx Fail. Err: 0x%X, FreeMB: %d, ESR: 0x%X\r\n", err, free_level, hcan.Instance->ESR);
+            stats_transfer_errors++;
+            stats_can_errors++;
             // 如果失败（含邮箱满/仲裁等），退出等待下一次主循环再尝试
             break;
         }
@@ -1021,6 +1278,8 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
         // 避免在中断中频繁打印，防止阻塞导致多帧丢失
         // printf("CAN RX ID: 0x%08X\r\n", rx_header.ExtId);
 
+        stats_frames_rx++;
+
         rx_frame.id = (rx_header.ExtId & CANARD_CAN_EXT_ID_MASK) | CANARD_CAN_FRAME_EFF;
         if (rx_header.RTR == CAN_RTR_REMOTE) {
             rx_frame.id |= CANARD_CAN_FRAME_RTR;
@@ -1032,6 +1291,10 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
         int16_t cr = canardHandleRxFrame(&canard_ins, &rx_frame, timestamp_us);
         if (cr >= 0) {
             (void)cr;
+            stats_transfers_rx++;
+        }
+        else {
+            stats_transfer_errors++;
         }
     }
 }

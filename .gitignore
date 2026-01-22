@@ -1,0 +1,33 @@
+# Build outputs (Keil MDK-ARM)
+MDK-ARM/**/CANtoPWM.axf
+MDK-ARM/**/CANtoPWM.htm
+MDK-ARM/**/CANtoPWM.build_log.htm
+MDK-ARM/**/CANtoPWM.dep
+MDK-ARM/**/CANtoPWM.lnp
+MDK-ARM/**/CANtoPWM.sct
+MDK-ARM/**/startup_stm32f103xb.lst
+MDK-ARM/**/*.d
+MDK-ARM/**/*.crf
+MDK-ARM/**/*.o
+MDK-ARM/**/*.lst
+MDK-ARM/**/*.map
+MDK-ARM/**/*.tra
+MDK-ARM/**/*.htm
+MDK-ARM/**/*.axf
+MDK-ARM/**/*.uvguix.*
+MDK-ARM/**/*.uvoptx
+MDK-ARM/**/RTE/
+MDK-ARM/**/DebugConfig/
+
+# Generated binaries/hex
+**/*.hex
+**/*.bin
+
+# Object/lists from startup or CMSIS builds
+**/startup_stm32f103xb.d
+
+# Logs
+**/*.log
+
+# VS Code workspace cache
+.vscode/

@@ -49,6 +49,10 @@ cantopwm\main.o: ../Core/include/uavcan/protocol/param/GetSet.h
 cantopwm\main.o: ../Core/include/uavcan\protocol\param\NumericValue.h
 cantopwm\main.o: ../Core/include/uavcan\protocol\param\Empty.h
 cantopwm\main.o: ../Core/include/uavcan\protocol\param\Value.h
+cantopwm\main.o: ../Core/include/uavcan/protocol/param/ExecuteOpcode.h
+cantopwm\main.o: ../Core/include/uavcan/protocol/RestartNode.h
+cantopwm\main.o: ../Core/include/uavcan/protocol/GetTransportStats.h
+cantopwm\main.o: ../Core/include/uavcan\protocol\CANIfaceStats.h
 cantopwm\main.o: E:\MyApp\Keil\Program\ARM\ArmCompiler506\Bin\..\include\stdio.h
 cantopwm\main.o: ../Core/Inc/canard_dynamic_node_id_client.h
 cantopwm\main.o: ../Core/include/uavcan/protocol/dynamic_node_id/Allocation.h
