@@ -575,6 +575,11 @@
               <FileType>1</FileType>
               <FilePath>..\Core\include\uavcan\protocol\param\param_ExecuteOpcode.c</FilePath>
             </File>
+            <File>
+              <FileName>app_logic.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\app_logic.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
