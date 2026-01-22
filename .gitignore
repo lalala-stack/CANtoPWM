@@ -19,10 +19,6 @@ MDK-ARM/**/*.uvoptx
 MDK-ARM/**/RTE/
 MDK-ARM/**/DebugConfig/
 
-# Generated binaries/hex
-**/*.hex
-**/*.bin
-
 # Object/lists from startup or CMSIS builds
 **/startup_stm32f103xb.d
 
