@@ -37,6 +37,7 @@
 #include "uavcan/protocol/param/ExecuteOpcode.h"
 #include "uavcan/protocol/RestartNode.h"
 #include "uavcan/protocol/GetTransportStats.h"
+#include "uavcan/protocol/file/BeginFirmwareUpdate.h"
 #include <stdio.h>
 #include "canard_dynamic_node_id_client.h"
 #include "app_logic.h"
@@ -66,6 +67,8 @@ void publishNodeStatus(void);
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 
+#define BOOTLOADER_FLAG_MAGIC 0xB007B007u
+#define BOOTLOADER_FLAG_REG   (BKP->DR1)
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -91,6 +94,7 @@ static bool dyn_allocation_active = false;
 static uint32_t dyn_last_req_ms = 0;
 static bool dyn_followup_pending = false; // schedule immediate follow-up chunk after allocator echo
 static uint32_t dyn_followup_deadline_ms = 0;
+static bool bootloader_update_requested = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -99,6 +103,9 @@ void SystemClock_Config(void);
 void read_unique_id(uint8_t* out_uid);
 static void update_tim2_tick_scale(void);
 static void start_dynamic_allocation(void);
+static void set_bootloader_flag(void);
+static void handleBeginFirmwareUpdate(CanardInstance* ins, CanardRxTransfer* transfer);
+static void boot_led_flash(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -143,6 +150,57 @@ void read_unique_id(uint8_t* out_uid)
     memcpy(out_uid, uid_buf, 12);
 }
 
+static void set_bootloader_flag(void)
+{
+    __HAL_RCC_BKP_CLK_ENABLE();
+    HAL_PWR_EnableBkUpAccess();
+    BOOTLOADER_FLAG_REG = BOOTLOADER_FLAG_MAGIC;
+    HAL_PWR_DisableBkUpAccess();
+}
+
+static void handleBeginFirmwareUpdate(CanardInstance* ins, CanardRxTransfer* transfer)
+{
+    static uavcan_protocol_file_BeginFirmwareUpdateRequest req;
+    static uint8_t path_buf[UAVCAN_PROTOCOL_FILE_PATH_PATH_MAX_LENGTH];
+    uint8_t* dyn_buf = path_buf;
+    memset(&req, 0, sizeof(req));
+    int32_t dec = uavcan_protocol_file_BeginFirmwareUpdateRequest_decode(
+        transfer, transfer->payload_len, &req, &dyn_buf);
+
+    uavcan_protocol_file_BeginFirmwareUpdateResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.error = UAVCAN_PROTOCOL_FILE_BEGINFIRMWAREUPDATE_RESPONSE_ERROR_OK;
+
+    static uint8_t buffer[UAVCAN_PROTOCOL_FILE_BEGINFIRMWAREUPDATE_RESPONSE_MAX_SIZE];
+    uint32_t len = uavcan_protocol_file_BeginFirmwareUpdateResponse_encode(&resp, buffer);
+    (void)canardRequestOrRespond(ins, transfer->source_node_id,
+                                 UAVCAN_PROTOCOL_FILE_BEGINFIRMWAREUPDATE_SIGNATURE,
+                                 UAVCAN_PROTOCOL_FILE_BEGINFIRMWAREUPDATE_ID,
+                                 &transfer->transfer_id,
+                                 transfer->priority,
+                                 CanardResponse,
+                                 buffer,
+                                 len);
+
+    if (dec >= 0) {
+        bootloader_update_requested = true;
+        restart_pending = true;
+        restart_request_time_ms = HAL_GetTick();
+        printf("[FWU] BeginFirmwareUpdate accepted\r\n");
+    } else {
+        printf("[FWU] Decode fail: %ld\r\n", (long)dec);
+    }
+}
+
+// Fast LED blink on boot to indicate firmware ready state
+static void boot_led_flash(void)
+{
+    for (int i = 0; i < 6; i++) {
+        HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+        HAL_Delay(50);
+    }
+}
+
 // --- 辅助工具：虚拟服务器实例 ---
 // 用于生成正确的 CAN 帧（自动处理多帧、CRC、尾字节）
 void inject_rx_frame_from_server(CanardInstance* server_ins, uint64_t timestamp_usec) {
@@ -156,8 +214,6 @@ void inject_rx_frame_from_server(CanardInstance* server_ins, uint64_t timestamp_
         canardPopTxQueue(server_ins);
     }
 }
-
-
 
 int main(void)
 {
@@ -206,6 +262,9 @@ int main(void)
 
   // 根据当前 PCLK1/预分频计算 TIM2 每微秒的计数，确保无论周期如何调整都能输出 1-2ms 脉宽
   update_tim2_tick_scale();
+
+    // 开机快速闪烁，提示固件已进入主程序
+    boot_led_flash();
 
   // 初始化libcanard
   canardInit(&canard_ins,
@@ -299,6 +358,9 @@ int main(void)
         bool tx_empty = (canardPeekTxQueue(&canard_ins) == NULL);
         bool waited = (HAL_GetTick() - restart_request_time_ms) > 200;
         if (tx_empty || waited) {
+            if (bootloader_update_requested) {
+                set_bootloader_flag();
+            }
             NVIC_SystemReset();
         }
     }
@@ -409,6 +471,12 @@ bool shouldAcceptTransfer(const CanardInstance* ins,
         *out_data_type_signature = UAVCAN_PROTOCOL_RESTARTNODE_SIGNATURE;
         return true;
     }
+
+    // BeginFirmwareUpdate Request (Service ID=40)
+    if (data_type_id == UAVCAN_PROTOCOL_FILE_BEGINFIRMWAREUPDATE_ID && transfer_type == CanardTransferTypeRequest) {
+        *out_data_type_signature = UAVCAN_PROTOCOL_FILE_BEGINFIRMWAREUPDATE_SIGNATURE;
+        return true;
+    }
     
     // GetNodeInfo Request (Service ID=1)
     if (data_type_id == UAVCAN_PROTOCOL_GETNODEINFO_ID && transfer_type == CanardTransferTypeRequest) {
@@ -479,6 +547,10 @@ void onTransferReception(CanardInstance* ins, CanardRxTransfer* transfer) {
     else if (transfer->data_type_id == UAVCAN_PROTOCOL_RESTARTNODE_ID &&
              transfer->transfer_type == CanardTransferTypeRequest) {
         handleRestartNode(ins, transfer);
+    }
+    else if (transfer->data_type_id == UAVCAN_PROTOCOL_FILE_BEGINFIRMWAREUPDATE_ID &&
+             transfer->transfer_type == CanardTransferTypeRequest) {
+        handleBeginFirmwareUpdate(ins, transfer);
     }
     // 检查数据类型
     else if (transfer->data_type_id == UAVCAN_EQUIPMENT_ACTUATOR_ARRAYCOMMAND_ID) {
