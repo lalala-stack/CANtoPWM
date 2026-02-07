@@ -40,7 +40,7 @@ void stats_inc_can_error(void) { stats_can_errors++; }
 
 #define PARAM_STORE_MAGIC   0x50415241u // 'PARA'
 #define PARAM_STORE_VERSION 1u
-#define PARAM_STORE_ADDR    0x0800FC00u // adjust for >64K parts
+#define PARAM_STORE_ADDR    0x0801FC00u // adjust for >64K parts
 
 typedef struct {
     uint32_t magic;

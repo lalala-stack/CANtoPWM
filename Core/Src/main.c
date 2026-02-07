@@ -41,6 +41,7 @@
 #include <stdio.h>
 #include "canard_dynamic_node_id_client.h"
 #include "app_logic.h"
+#include "bootloader.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -67,8 +68,6 @@ void publishNodeStatus(void);
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 
-#define BOOTLOADER_FLAG_MAGIC 0xB007B007u
-#define BOOTLOADER_FLAG_REG   (BKP->DR1)
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -152,10 +151,22 @@ void read_unique_id(uint8_t* out_uid)
 
 static void set_bootloader_flag(void)
 {
-    __HAL_RCC_BKP_CLK_ENABLE();
-    HAL_PWR_EnableBkUpAccess();
-    BOOTLOADER_FLAG_REG = BOOTLOADER_FLAG_MAGIC;
-    HAL_PWR_DisableBkUpAccess();
+    #define BOOTLOADER_FLAG_ADDR  0x0801FB00u
+    #define BOOTLOADER_FLAG_MAGIC 0xB007B007u
+
+    HAL_FLASH_Unlock();
+    // Erase the page containing the flag (page 127 for STM32F103CBT6)
+    FLASH_EraseInitTypeDef erase = {0};
+    erase.TypeErase = FLASH_TYPEERASE_PAGES;
+    erase.PageAddress = BOOTLOADER_FLAG_ADDR;
+    erase.NbPages = 1;
+    uint32_t page_error = 0;
+    if (HAL_FLASHEx_Erase(&erase, &page_error) != HAL_OK) {
+        printf("[FWU] Flash erase failed err=0x%lX\r\n", (unsigned long)page_error);
+    }
+    // Write the bootloader flag magic value
+    HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, BOOTLOADER_FLAG_ADDR, BOOTLOADER_FLAG_MAGIC);
+    HAL_FLASH_Lock();
 }
 
 static void handleBeginFirmwareUpdate(CanardInstance* ins, CanardRxTransfer* transfer)
@@ -220,6 +231,9 @@ int main(void)
 
   /* USER CODE BEGIN 1 */
   uint16_t led_cnt = 0;
+
+  // Check bootloader flag early, before HAL init peripherals
+  bootloader_entry();
 
   /* USER CODE END 1 */
 
