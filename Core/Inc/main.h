@@ -59,7 +59,12 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 
 /* USER CODE BEGIN Private defines */
-
+/* TJA1042 CAN transceiver standby control pin.
+ * STB = LOW  -> normal (active) mode  ← required for communication
+ * STB = HIGH -> standby mode (bus silent, chip powered down)
+ * Adjust the pin/port below if your board wires STB to a different GPIO. */
+#define TJA1042_STB_Pin        GPIO_PIN_0
+#define TJA1042_STB_GPIO_Port  GPIOB
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus
