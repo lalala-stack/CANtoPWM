@@ -1,0 +1,18 @@
+# Normalize line endings to LF in the repository, check out as-is on all platforms
+* text=auto
+
+# Force LF for text source files
+*.c text eol=lf
+*.h text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.ioc text eol=lf
+*.gitignore text eol=lf
+*.gitattributes text eol=lf
+
+# Keil project files — treat as binary to avoid line-ending corruption
+*.uvprojx binary
+*.uvoptx binary
+*.axf binary
+*.hex binary
+*.bin binary
