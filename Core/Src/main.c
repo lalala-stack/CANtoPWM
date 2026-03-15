@@ -512,7 +512,7 @@ bool shouldAcceptTransfer(const CanardInstance* ins,
     }
 
     // Param GetSet
-    if (data_type_id == UAVCAN_PROTOCOL_PARAM_GETSET_ID) {
+    if (data_type_id == UAVCAN_PROTOCOL_PARAM_GETSET_ID && transfer_type == CanardTransferTypeRequest) {
         // printf("Accept Param Req\r\n"); // Debug
         *out_data_type_signature = UAVCAN_PROTOCOL_PARAM_GETSET_SIGNATURE;
         return true;
@@ -529,6 +529,8 @@ bool shouldAcceptTransfer(const CanardInstance* ins,
 
 // 接收到完整传输后的回调函数
 void onTransferReception(CanardInstance* ins, CanardRxTransfer* transfer) {
+    // 每个完整传输计数一次
+    stats_inc_transfer_rx();
     // 动态ID分配 (Message ID=1, Broadcast)
     if (transfer->data_type_id == UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID && 
         transfer->transfer_type == CanardTransferTypeBroadcast)
@@ -549,7 +551,8 @@ void onTransferReception(CanardInstance* ins, CanardRxTransfer* transfer) {
         handleGetNodeInfo(ins, transfer);
     }
     // Param GetSet Request
-    else if (transfer->data_type_id == UAVCAN_PROTOCOL_PARAM_GETSET_ID) {
+    else if (transfer->data_type_id == UAVCAN_PROTOCOL_PARAM_GETSET_ID &&
+             transfer->transfer_type == CanardTransferTypeRequest) {
         handleParamGetSet(ins, transfer);
     }
     // Param ExecuteOpcode Request
@@ -741,7 +744,7 @@ void processCanTxQueue(void) {
         
         tx_frame = canardPeekTxQueue(&canard_ins);
         if (tx_frame == NULL) {
-            printf("[DynID] TX queue empty\r\n");
+            printf("[CAN TX] TX queue empty\r\n");
         }
     }
 }
@@ -813,7 +816,9 @@ void publishNodeStatus(void)
                     CANARD_TRANSFER_PRIORITY_LOW,
                     buffer,
                     len);
-    // printf("NodeStatus TX: %d\r\n", res);
+    if (res < 0) {
+        printf("[NodeStatus] Broadcast failed: %d\r\n", res);
+    }
 }
 
 // CAN接收中断回调函数
@@ -840,11 +845,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
         
         uint64_t timestamp_us = HAL_GetTick() * 1000;
         int16_t cr = canardHandleRxFrame(&canard_ins, &rx_frame, timestamp_us);
-        if (cr >= 0) {
-            (void)cr;
-            stats_inc_transfer_rx();
-        }
-        else {
+        if (cr < 0) {
             stats_inc_transfer_error();
         }
     }

@@ -130,9 +130,10 @@ static uint32_t pulse_us_to_ticks(uint16_t pulse_us) {
 void processActuatorCommands(uavcan_equipment_actuator_ArrayCommand* cmd) {
     for (uint8_t i = 0; i < cmd->commands.len; i++) {
         uavcan_equipment_actuator_Command* single_cmd = &cmd->commands.data[i];
-        uint16_t pulse_us = 1500 + (uint16_t)(single_cmd->command_value * 500.0f);
-        if (pulse_us < 1000) pulse_us = 1000;
-        if (pulse_us > 2000) pulse_us = 2000;
+        float pulse_f = 1500.0f + single_cmd->command_value * 500.0f;
+        if (pulse_f < 1000.0f) pulse_f = 1000.0f;
+        if (pulse_f > 2000.0f) pulse_f = 2000.0f;
+        uint16_t pulse_us = (uint16_t)pulse_f;
         int32_t ch = get_mapped_channel(single_cmd->actuator_id);
         uint32_t ccr = pulse_us_to_ticks(pulse_us);
         if (ch < 0 || ch > 3) {
@@ -155,9 +156,10 @@ void processEscRawCommand(uavcan_equipment_esc_RawCommand* raw, uint8_t source_n
         float norm = (float)rc / 8192.0f;
         if (norm < -1.0f) norm = -1.0f;
         if (norm > 1.0f) norm = 1.0f;
-        uint16_t pulse = 1500 + (uint16_t)(norm * 500.0f);
-        if (pulse < 1000) pulse = 1000;
-        if (pulse > 2000) pulse = 2000;
+        float pulse_f = 1500.0f + norm * 500.0f;
+        if (pulse_f < 1000.0f) pulse_f = 1000.0f;
+        if (pulse_f > 2000.0f) pulse_f = 2000.0f;
+        uint16_t pulse = (uint16_t)pulse_f;
         int32_t ch = get_mapped_channel(i);
         uint32_t ccr = pulse_us_to_ticks(pulse);
         printf("  ESC[%d] rc=%d norm=%.3f pulse=%u us ch=%ld\r\n", i, rc, norm, pulse, (long)ch);
