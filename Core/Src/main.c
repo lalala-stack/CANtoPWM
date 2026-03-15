@@ -52,7 +52,6 @@ bool shouldAcceptTransfer(const CanardInstance* ins,
                          CanardTransferType transfer_type,
                          uint8_t source_node_id);
 void onTransferReception(CanardInstance* ins, CanardRxTransfer* transfer);
-void processCanRxFrames(void);
 void processCanTxQueue(void);
 int16_t sendActuatorCommand(CanardInstance* ins, uint8_t actuator_id, float value);
 int16_t sendNodeStatusRequest(CanardInstance* ins, uint8_t target_node_id);
@@ -95,6 +94,7 @@ static uint32_t dyn_last_req_ms = 0;
 static bool dyn_followup_pending = false; // schedule immediate follow-up chunk after allocator echo
 static uint32_t dyn_followup_deadline_ms = 0;
 static bool bootloader_update_requested = false;
+static volatile uint32_t can_rx_irq_count = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -106,6 +106,7 @@ static void start_dynamic_allocation(void);
 static void set_bootloader_flag(void);
 static void handleBeginFirmwareUpdate(CanardInstance* ins, CanardRxTransfer* transfer);
 static void boot_led_flash(void);
+static bool wait_mailbox_result(uint32_t mailbox, uint32_t timeout_ms, bool* out_txok, uint32_t* out_tsr_snapshot);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -298,7 +299,12 @@ int main(void)
 
   // 启动CAN
   HAL_CAN_Start(&hcan);
-  HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO0_MSG_PENDING);
+    HAL_CAN_ActivateNotification(&hcan,
+                                                             CAN_IT_RX_FIFO0_MSG_PENDING |
+                                                             CAN_IT_ERROR_WARNING |
+                                                             CAN_IT_ERROR_PASSIVE |
+                                                             CAN_IT_BUSOFF |
+                                                             CAN_IT_LAST_ERROR_CODE);
 
   /* USER CODE END 2 */
 
@@ -352,6 +358,19 @@ int main(void)
     // 清理过期的传输
     uint64_t timestamp = HAL_GetTick() * 1000; // 转换为微秒
     canardCleanupStaleTransfers(&canard_ins, timestamp);
+
+    // 每秒打印一次 RX 中断计数，快速判断是否有任何合法 CAN 帧进入 FIFO
+    static uint32_t rx_mon_last_ms = 0;
+    static uint32_t rx_mon_last_cnt = 0;
+    if (HAL_GetTick() - rx_mon_last_ms >= 1000U) {
+        uint32_t now_cnt = can_rx_irq_count;
+        uint32_t delta = now_cnt - rx_mon_last_cnt;
+        printf("[CAN RX] irq/s=%lu total=%lu\r\n",
+               (unsigned long)delta,
+               (unsigned long)now_cnt);
+        rx_mon_last_cnt = now_cnt;
+        rx_mon_last_ms = HAL_GetTick();
+    }
 
     // 如收到 RestartNode 请求，等回复排队后再复位，避免截断响应
     if (restart_pending) {
@@ -610,6 +629,56 @@ static void start_dynamic_allocation(void) {
     }
 }
 
+static bool wait_mailbox_result(uint32_t mailbox, uint32_t timeout_ms, bool* out_txok, uint32_t* out_tsr_snapshot)
+{
+    uint32_t rqcp_mask = 0U;
+    uint32_t txok_mask = 0U;
+    uint32_t abrq_mask = 0U;
+
+    switch (mailbox) {
+        case CAN_TX_MAILBOX0:
+            rqcp_mask = CAN_TSR_RQCP0;
+            txok_mask = CAN_TSR_TXOK0;
+            abrq_mask = CAN_TSR_ABRQ0;
+            break;
+        case CAN_TX_MAILBOX1:
+            rqcp_mask = CAN_TSR_RQCP1;
+            txok_mask = CAN_TSR_TXOK1;
+            abrq_mask = CAN_TSR_ABRQ1;
+            break;
+        case CAN_TX_MAILBOX2:
+            rqcp_mask = CAN_TSR_RQCP2;
+            txok_mask = CAN_TSR_TXOK2;
+            abrq_mask = CAN_TSR_ABRQ2;
+            break;
+        default:
+            return false;
+    }
+
+    uint32_t t0 = HAL_GetTick();
+    while ((hcan.Instance->TSR & rqcp_mask) == 0U) {
+        if ((HAL_GetTick() - t0) >= timeout_ms) {
+            hcan.Instance->TSR |= abrq_mask;
+            if (out_tsr_snapshot != NULL) {
+                *out_tsr_snapshot = hcan.Instance->TSR;
+            }
+            return false;
+        }
+    }
+
+    uint32_t tsr = hcan.Instance->TSR;
+    if (out_tsr_snapshot != NULL) {
+        *out_tsr_snapshot = tsr;
+    }
+    if (out_txok != NULL) {
+        *out_txok = ((tsr & txok_mask) != 0U);
+    }
+
+    // Clear request complete flag for this mailbox so next wait is valid.
+    hcan.Instance->TSR |= rqcp_mask;
+    return true;
+}
+
 // 处理发送队列
 void processCanTxQueue(void) {
 
@@ -637,10 +706,28 @@ void processCanTxQueue(void) {
         }
 
         if (HAL_CAN_AddTxMessage(&hcan, &tx_header, tx_frame->data, &mailbox) == HAL_OK) {
-            // 成功发送，从队列移除
-            canardPopTxQueue(&canard_ins);
-            stats_inc_frame_tx();
-            stats_inc_transfer_tx();
+            bool txok = false;
+            uint32_t tsr = 0U;
+            bool complete = wait_mailbox_result(mailbox, 3U, &txok, &tsr);
+
+            if (complete && txok) {
+                // 仅在邮箱确认发送成功后再出队，避免“队列空但总线无ACK”的假象
+                canardPopTxQueue(&canard_ins);
+                stats_inc_frame_tx();
+                stats_inc_transfer_tx();
+            } else {
+                uint32_t err = HAL_CAN_GetError(&hcan);
+                printf("CAN Tx NotAck/Fail. MB:%lu Complete:%d TxOK:%d Err:0x%lX ESR:0x%08lX TSR:0x%08lX\r\n",
+                       (unsigned long)mailbox,
+                       complete ? 1 : 0,
+                       txok ? 1 : 0,
+                       (unsigned long)err,
+                       (unsigned long)hcan.Instance->ESR,
+                       (unsigned long)tsr);
+                stats_inc_transfer_error();
+                stats_inc_can_error();
+                return;
+            }
         } else {
             // 发送失败，打印错误原因
             uint32_t err = HAL_CAN_GetError(&hcan);
@@ -661,25 +748,29 @@ void processCanTxQueue(void) {
 
 // 发送执行器命令的广播函数
 int16_t sendActuatorCommand(CanardInstance* ins, uint8_t actuator_id, float value) {
-    CanardTxTransfer transfer;
-    canardInitTxTransfer(&transfer);
-    
-    // 准备数据
-    // 这里简化处理，实际应根据协议格式编码数据
-    uint8_t buffer[8];
-    // 假设将actuator_id和value编码到buffer中
-    
-    // 设置传输参数
-    transfer.transfer_type = CanardTransferTypeBroadcast;
-    transfer.data_type_signature = UAVCAN_EQUIPMENT_ACTUATOR_ARRAYCOMMAND_SIGNATURE;
-    transfer.data_type_id = UAVCAN_EQUIPMENT_ACTUATOR_ARRAYCOMMAND_ID;
-    transfer.inout_transfer_id = &actuator_cmd_transfer_id;
-    transfer.priority = CANARD_TRANSFER_PRIORITY_MEDIUM;
-    transfer.payload = buffer;
-    transfer.payload_len = sizeof(buffer);
-    
+    // 构建命令结构
+    uavcan_equipment_actuator_Command cmd;
+    cmd.actuator_id = actuator_id;
+    cmd.command_type = UAVCAN_EQUIPMENT_ACTUATOR_COMMAND_COMMAND_TYPE_UNITLESS;
+    cmd.command_value = value;
+
+    // 构建数组命令结构
+    uavcan_equipment_actuator_ArrayCommand array_cmd;
+    array_cmd.commands.len = 1;
+    array_cmd.commands.data = &cmd;
+
+    // 编码数据到buffer
+    uint8_t buffer[UAVCAN_EQUIPMENT_ACTUATOR_ARRAYCOMMAND_MAX_SIZE];
+    uint32_t len = uavcan_equipment_actuator_ArrayCommand_encode(&array_cmd, buffer);
+
     // 发送广播
-    return canardBroadcastObj(ins, &transfer);
+    return canardBroadcast(ins,
+                           UAVCAN_EQUIPMENT_ACTUATOR_ARRAYCOMMAND_SIGNATURE,
+                           UAVCAN_EQUIPMENT_ACTUATOR_ARRAYCOMMAND_ID,
+                           &actuator_cmd_transfer_id,
+                           CANARD_TRANSFER_PRIORITY_MEDIUM,
+                           buffer,
+                           len);
 }
 
 // 发送服务请求的示例
@@ -737,6 +828,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
         // 避免在中断中频繁打印，防止阻塞导致多帧丢失
         // printf("CAN RX ID: 0x%08X\r\n", rx_header.ExtId);
 
+        can_rx_irq_count++;
         stats_inc_frame_rx();
 
         rx_frame.id = (rx_header.ExtId & CANARD_CAN_EXT_ID_MASK) | CANARD_CAN_FRAME_EFF;
@@ -756,6 +848,16 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
             stats_inc_transfer_error();
         }
     }
+}
+
+void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan)
+{
+    uint32_t err = HAL_CAN_GetError(hcan);
+    printf("[CAN ERR] HAL:0x%08lX ESR:0x%08lX TSR:0x%08lX\r\n",
+           (unsigned long)err,
+           (unsigned long)hcan->Instance->ESR,
+           (unsigned long)hcan->Instance->TSR);
+    stats_inc_can_error();
 }
 
 /* USER CODE END 4 */
